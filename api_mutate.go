@@ -64,12 +64,13 @@ func (s *server) mutate(apply func(idx *Index) error, verify func(idx *Index) bo
 }
 
 type updateReq struct {
-	ID     string   `json:"id"`
-	Result string   `json:"result"`
-	Exam   string   `json:"exam"`
-	Source string   `json:"source"`
-	Tags   []string `json:"tags"`
-	Note   string   `json:"note"`
+	ID       string   `json:"id"`
+	Result   string   `json:"result"`
+	Exam     string   `json:"exam"`
+	Source   string   `json:"source"`
+	Analysis string   `json:"analysis"` // 错因要点：手改后覆盖 md 里解析出的「错因/要点」
+	Tags     []string `json:"tags"`
+	Note     string   `json:"note"`
 }
 
 // PUT /api/entry  body: {"id":..., "result":"wrong", "tags":[...], "note":"..."}
@@ -91,6 +92,7 @@ func (s *server) updateEntry(w http.ResponseWriter, r *http.Request) {
 	_, hasNote := raw["note"]
 	_, hasExam := raw["exam"]
 	_, hasSource := raw["source"]
+	_, hasAnalysis := raw["analysis"]
 
 	switch req.Source {
 	case "", "校内作业", "课外班作业", "校内考试", "自我复习":
@@ -129,6 +131,9 @@ func (s *server) updateEntry(w http.ResponseWriter, r *http.Request) {
 				if hasSource {
 					idx.Items[i].Source = req.Source
 				}
+				if hasAnalysis {
+					idx.Items[i].Analysis = req.Analysis
+				}
 				if req.Tags != nil {
 					idx.Items[i].Tags = compactTags(req.Tags)
 				}
@@ -154,6 +159,9 @@ func (s *server) updateEntry(w http.ResponseWriter, r *http.Request) {
 					return false
 				}
 				if hasSource && it.Source != req.Source {
+					return false
+				}
+				if hasAnalysis && it.Analysis != req.Analysis {
 					return false
 				}
 				if req.Tags != nil && !reflect.DeepEqual(it.Tags, compactTags(req.Tags)) {

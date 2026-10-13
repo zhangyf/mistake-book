@@ -46,6 +46,8 @@ exam-bank/
   "qno": "第4题",
   "qtype": "选择题",
   "result": "correct",
+  "source": "校内考试",
+  "analysis": "$-3^4$ 的底数是 3，负号在最外层；B 是陷阱项。",
   "tags": ["乘方", "底数判断"],
   "md_key": "exam-bank/数学/2026-09-第一章有理数测验/2026-09-21-IMG_20260921_222934.md",
   "image_key": "exam-bank/数学/2026-09-第一章有理数测验/images/2026-09-21-IMG_20260921_222934.jpg",
@@ -54,6 +56,8 @@ exam-bank/
 ```
 
 - `result`：`correct` / `wrong` / `unknown`（看不出批改结果就写 unknown，不要猜）。
+- `source`：错题出处，只能是 `校内作业` / `课外班作业` / `校内考试` / `自我复习`（网页上是下拉选择；老师没说就留空，别猜）。
+- `analysis`：错因要点。**留空时展示 md 里解析出的「错因/要点」；一旦填了就覆盖 md 那份**（老师会在网页上手改，所以录入时可以不填，让 md 说话）。
 - `tags`：知识点标签，导出时按知识点成卷用。
 - 同名 id 重复录入 = 覆盖更新（改判对错、补笔记直接重录）。
 
@@ -78,12 +82,13 @@ photo: IMG_20260921_222934.jpg
 
 **我的作答**：C
 
-**批改**：✓ 正确（红笔圈出 + 勾）
-
 **错因/要点**：$-3^4$ 的底数是 3，负号在最外层；B 是陷阱项。
 ```
 
-计算/解答题的作答按原卷步骤逐行抄，每步一行（后面导出 PDF 时一步一行排版）。
+- 计算/解答题的作答按原卷步骤逐行抄，每步一行（导出时一步一行排版）。
+- **不写「批改」字段**（2026-10-13 老师明确要求去掉）：对错一律用索引的 `result` 表达，
+  md 里不再记第二遍。历史 md 里已有的 `**批改**：` 行，解析时会被直接丢掉。
+  红笔痕迹（勾/叉/圈/问号）只用来判断 `result`，判断完就丢，不落 md。
 
 ## 工作流
 
@@ -92,7 +97,7 @@ photo: IMG_20260921_222934.jpg
 - 日期（默认取照片文件名里的日期 `IMG_20260921_…` → 2026-09-21；取不到用今天）
 - 照片原始文件名（老师消息里的 `@image#1:IMG_xxx.jpg`，用它做文件标识，不要用 `clipboard-2026-…` 那种临时名）
 
-**2. 摘题。** 把题干、选项、图/表信息逐字提取；数学式子一律 LaTeX（行内 `$…$`，独立 `$$…$$`）。同时记录老师的作答过程和红笔批改痕迹（勾/叉/圈/问号/旁批）。
+**2. 摘题。** 把题干、选项、图/表信息逐字提取；数学式子一律 LaTeX（行内 `$…$`，独立 `$$…$$`）。同时看红笔批改痕迹（勾/叉/圈/问号/旁批）判断对错 —— 判断结果写进索引的 `result`，不写进 md。
 
 **3. 写 md。** 落到工作区 `outputs/`，按上面模板。**先把提取结果给老师看一眼再上传**。
 
@@ -142,8 +147,10 @@ $EB serve --addr 0.0.0.0 --auth-token xxxx   # 对外暴露必须带 token
 `mistake-book serve` 起一个纯 `net/http` 的服务（端口默认 8081），前端原生 JS + 内联 KaTeX，`go:embed` 打进二进制，**零外网 CDN**。
 
 - **集中页**：各科错题本卡片（题数 / 对错 / 所属试卷）→ 点进科目。
-- **详情页**：可按 **日期 / 知识点 / 题型 / 对错** 四个维度切换分组，支持按对错筛选、知识点多选、关键词搜索；点条目展开详情（左原图、右字段，LaTeX 由 KaTeX 渲染）；每条可改 result / tags / note，可删条目（只删索引，md 和原图保留）。
-- API：`GET /api/subjects`、`GET /api/entries`、`GET|PUT|DELETE /api/entry`、`GET /api/image?key=`（后端代理，凭证不出后端）。
+- **详情页**：可按 **日期 / 知识点 / 题型 / 出处 / 对错** 五个维度切换分组，支持按对错筛选、知识点多选、关键词搜索；点条目展开详情（左原图、右字段，LaTeX 由 KaTeX 渲染）。
+- **可改的字段**：对错 `result`、试卷名 `exam`、出处 `source`（四选一下拉）、错因要点 `analysis`、知识点 `tags`、备注 `note`。保存后不整页刷新，只重拉列表 + 重开当前详情。可删条目（只删索引，md 和原图保留）。
+- **导出**：详情页工具栏「导出」按钮，弹窗里选范围（当前筛选结果 / 本科目全部）、格式、内容。见下面「导出」。
+- API：`GET /api/subjects`、`GET /api/entries`、`GET|PUT|DELETE /api/entry`、`GET /api/image?key=`（后端代理，凭证不出后端）、`POST /api/export`。
 - 鉴权：`--auth-token`（或 `MISTAKE_AUTH_TOKEN`），非 loopback 监听没设 token 会拒绝启动。静态资源不鉴权，token 在页面输入后存 localStorage。
   - ⚠️ 前端发的是 **`X-Mistake-Token` 头，不是 `Authorization`**：线上前面还有一层 nginx Basic Auth，浏览器会自动给同源请求带 Basic 凭据，fetch 再设 `Authorization` 会把 Basic 覆盖掉，nginx 直接回 401（2026-10-13 部署时踩到：首页 200 但 /api 全 401）。
 - ⚠️ **改了 `web/` 下任何文件都必须重新编译二进制**（embed 打进去的）。
@@ -200,8 +207,8 @@ ssh -i <jrp_deploy> -o BatchMode=yes -o StrictHostKeyChecking=no root@154.8.216.
 2. **字迹不确定要标注**，写 `〔?〕` 并说明，不要凭语感补字。
 3. **不臆造**：照片上没有的分数、批改标记、知识点，一律不写；`result` 看不出就 `unknown`。
 4. **原图必传**，md 里通过 `image_key` 关联，不单独存裁剪图。
-5. **批改痕迹要还原**：勾/叉/圈/问号/老师旁批都写进「批改」行，这是判断错因的依据。
-6. **老师写的作答和正确答案分开记**：作答归「我的作答」，对错归「批改」，别混。
+5. **对错只落在索引的 `result`**：md 里不写「批改」行。红笔痕迹（勾/叉/圈/问号）是判断 `result` 的依据，判断完不落盘。
+6. **老师写的作答和正确答案分开记**：作答归「我的作答」，标准答案归「答案/正解」，别混。
 
 ## Critical Rules
 
@@ -212,11 +219,33 @@ ssh -i <jrp_deploy> -o BatchMode=yes -o StrictHostKeyChecking=no root@154.8.216.
 5. **上传前先给老师看提取结果**，确认无误再落 COS。
 6. 报告/临时文件放在工作区 `outputs/` 下，否则 present_files 不触发。
 
-## 导出 PDF（接口预留，尚未实现）
+## 导出
 
-后续实现时走：按 index.json 筛条目 → 取 md → 渲染 HTML（内联 CSS，不依赖外网 CDN）→ Chrome/Edge headless `--print-to-pdf`。
-环境已具备：`/c/Program Files/Google/Chrome/Application/chrome.exe`、`/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe`，PyMuPDF 已装（拼版/页码/加页眉）。
-等老师给具体布局（A4 几栏、要不要留作答空白、要不要附答案、按知识点还是按时间排序）再开工。
+网页上点「导出」即可（后端 `POST /api/export`），两件事都能选：
+
+**格式**
+
+| format | 产物 | 说明 |
+|---|---|---|
+| `md` | `.md` | 纯文本，方便贴到别处 / 导入别的工具。原图放 **7 天有效的 COS 预签名链接**（不往 md 里塞 base64） |
+| `html` | `.html` | 单文件：KaTeX 的 CSS + JS + **20 个 woff2 字体全部 base64 内联**，断网也能看公式 |
+| `pdf` | — | **不做真·PDF 生成**：中文字体要嵌进 PDF 才有字，纯 Go 无依赖做不干净。改成吐一份排版好的 HTML 并自动 `window.print()`，在打印对话框里选「另存为 PDF」。公式是 KaTeX 矢量字，比截图清楚 |
+
+**内容**（`fields`，可多选）：`meta` 元信息 / `stem` 题干 / `answer` 我的作答 / `analysis` 错因要点 / `solution` 答案正解 / `note` 备注 / `image` 原图 / `other` md 里的其他字段。
+
+**范围**：`ids` 传空 = 导出该科目全部（按日期排序）；传 id 数组 = 只导出这些、按给定顺序（前端「当前筛选结果」走这条）。
+
+```bash
+curl -X POST -H 'X-Mistake-Token: <token>' -H 'Content-Type: application/json' \
+  -d '{"subject":"数学","format":"md","fields":["meta","stem","answer","analysis"],"ids":null}' \
+  https://mistake.110105.xyz/api/export -o 错题本.md
+```
+
+错因要点取值优先级：索引里的 `analysis`（老师手改过的）> md 里解析出的「错因/要点」。
+md 字段别名容错：`错因/要点`＝`错因要点`＝`错因`＝`要点`；`答案`＝`正解`＝`正确答案`。
+
+> 按固定布局批量出练习卷（A4 几栏、留作答空白、按知识点排序）仍是未做的需求，
+> 等老师给具体版式再说。当前导出是「把选中的题原样排版出来」。
 
 ## 源码与编译
 

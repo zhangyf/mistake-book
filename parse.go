@@ -18,7 +18,10 @@ import (
 // 前端用 <pre> 展示，绝不白屏。
 
 // knownOrder 是希望展示的字段顺序（前端也按这个顺序渲染）。
-var knownOrder = []string{"题干", "我的作答", "批改", "错因/要点", "错因", "要点", "答案", "正解"}
+//
+// 注：2026-10-13 去掉了「批改」——对错由索引的 result 字段表达，md 里不需要
+// 再记一遍，老师明确说不要。历史 md 里的 **批改**： 会被解析时直接丢掉。
+var knownOrder = []string{"题干", "我的作答", "错因/要点", "错因", "要点", "答案", "正解"}
 
 var (
 	headingRe     = regexp.MustCompile(`(?m)^#{1,6}\s+(.*)$`)
@@ -132,6 +135,11 @@ func parseFields(src string) []Section {
 			if cur != nil {
 				cur.Value += "\n" + line
 			}
+			continue
+		}
+		if strings.TrimSpace(m[1]) == "批改" {
+			flush()   // 丢弃该字段：对错以索引的 result 为准
+			cur = nil // 后续行也不要并进上一个字段
 			continue
 		}
 		flush()

@@ -182,7 +182,8 @@ type Entry struct {
 	Qno       string   `json:"qno"`
 	Qtype     string   `json:"qtype,omitempty"`
 	Result    string   `json:"result,omitempty"`
-	Source    string   `json:"source,omitempty"` // 错题出处：校内作业/课外班作业/校内考试/自我复习
+	Source    string   `json:"source,omitempty"`   // 错题出处：校内作业/课外班作业/校内考试/自我复习
+	Analysis  string   `json:"analysis,omitempty"` // 错因要点（网页可改；非空时覆盖 md 里解析出的「错因/要点」）
 	Tags      []string `json:"tags,omitempty"`
 	MdKey     string   `json:"md_key,omitempty"`
 	ImageKey  string   `json:"image_key,omitempty"`
@@ -271,6 +272,9 @@ func mergeEntry(old, neu Entry) Entry {
 	}
 	if neu.Source != "" {
 		out.Source = neu.Source
+	}
+	if neu.Analysis != "" {
+		out.Analysis = neu.Analysis
 	}
 	if neu.MdKey != "" {
 		out.MdKey = neu.MdKey

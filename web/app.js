@@ -65,6 +65,56 @@ var app = (function () {
     });
   }
 
+  // apiRaw —— 导出用：要的是原始字节（md/html），不是 JSON
+  function apiRaw(path, opts) {
+    opts = opts || {};
+    var headers = opts.headers || {};
+    if (token()) headers['X-Mistake-Token'] = token();
+    if (opts.body) headers['Content-Type'] = 'application/json';
+    return fetch(path, {
+      method: opts.method || 'GET',
+      headers: headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined
+    }).then(function (r) {
+      if (r.status === 401) {
+        toast('token 不对，请重设');
+        askToken();
+        throw new Error('unauthorized');
+      }
+      if (!r.ok) {
+        return r.json().catch(function () { return {}; }).then(function (d) {
+          throw new Error((d && d.error) || ('HTTP ' + r.status));
+        });
+      }
+      return r;
+    });
+  }
+
+  // download —— Blob → <a download> 触发保存
+  function download(blob, filename) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 3000);
+  }
+
+  // printHTML —— 把导出的 HTML 塞进隐藏 iframe，页面自己会调 window.print()。
+  // 走 iframe 而不是 window.open，是为了不被弹窗拦截。
+  function printHTML(blob) {
+    var url = URL.createObjectURL(blob);
+    var f = document.createElement('iframe');
+    f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+    f.src = url;
+    document.body.appendChild(f);
+    setTimeout(function () {
+      URL.revokeObjectURL(url);
+      f.remove();
+    }, 120000);
+  }
+
   // ---------- DOM 工具 ----------
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -143,8 +193,9 @@ var app = (function () {
   }
 
   return {
-    boot: boot, api: api, el: el, renderText: renderText, math: math,
+    boot: boot, api: api, apiRaw: apiRaw, el: el, renderText: renderText, math: math,
     toast: toast, setToken: setToken, token: token,
+    download: download, printHTML: printHTML,
     // <img> 没法带自定义头，只能把 token 拼进 URL（后端也接受 ?token=）
     withToken: function (url) {
       var t = token();

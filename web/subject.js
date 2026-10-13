@@ -15,6 +15,27 @@ views.subject = (function () {
   var DIM_LABEL = { date: '按日期', tag: '按知识点', type: '按题型', source: '按出处', result: '按对错' };
   var SOURCES = ['校内作业', '课外班作业', '校内考试', '自我复习'];
 
+  // md 里表示「错因要点」的几种写法（后端 analysisKeys 一致）
+  var ANALYSIS_KEYS = ['错因/要点', '错因要点', '错因', '要点', '错因分析', '错误原因'];
+
+  // 导出：格式与内容可选项（与后端 api_export.go 的 exportFields 对应）
+  var FORMATS = [
+    ['md', 'Markdown（.md，纯文本）'],
+    ['html', 'HTML（.html，单文件，断网可看）'],
+    ['pdf', 'PDF（生成排版页后唤起打印，在对话框里选「另存为 PDF」）']
+  ];
+  var EXPORT_FIELDS = [
+    ['meta', '元信息（科目/试卷/日期/题号/出处/知识点/对错）'],
+    ['stem', '题干'],
+    ['answer', '我的作答'],
+    ['analysis', '错因要点'],
+    ['solution', '答案/正解'],
+    ['note', '备注'],
+    ['image', '原图'],
+    ['other', 'md 里的其他字段']
+  ];
+  var DEFAULT_FIELDS = ['meta', 'stem', 'answer', 'analysis', 'solution', 'note'];
+
   function render(main, subject) {
     state.subject = subject;
     state.items = []; state.facets = {}; state.filterTags = []; state.filterResult = '';
@@ -50,6 +71,10 @@ views.subject = (function () {
     search.placeholder = '搜索题干/备注/知识点';
     search.oninput = function () { state.kw = search.value.trim().toLowerCase(); paintList(main); };
     bar.appendChild(search);
+
+    var exp = app.el('button', 'primary', '导出');
+    exp.onclick = function () { openExport(); };
+    bar.appendChild(exp);
 
     var tagBar = app.el('div', 'toolbar');
     main.appendChild(tagBar);
@@ -213,16 +238,38 @@ views.subject = (function () {
       // 右：字段
       var right = app.el('div');
       var pm = d.parsed_md;
-      if (pm && pm.parsed && pm.sections && pm.sections.length) {
+      var parsedOK = !!(pm && pm.parsed && pm.sections && pm.sections.length);
+      var secs = parsedOK ? pm.sections.slice() : [];
+
+      // 索引里手改过的错因要点覆盖 md 里解析出来的那一份
+      if (d.analysis) {
+        var ai = -1;
+        for (var i = 0; i < secs.length; i++) {
+          if (ANALYSIS_KEYS.indexOf(secs[i].key) >= 0) { ai = i; break; }
+        }
+        if (ai >= 0) {
+          secs[ai] = { key: secs[ai].key, value: d.analysis };
+        } else {
+          var at = secs.length;
+          for (var j = 0; j < secs.length; j++) {
+            if (secs[j].key === '我的作答') { at = j + 1; break; }
+          }
+          secs.splice(at, 0, { key: '错因要点', value: d.analysis });
+        }
+      }
+
+      function addField(k, v) {
+        var f = app.el('div', 'field');
+        f.appendChild(app.el('div', 'k', k));
+        var box2 = app.el('div', 'v');
+        f.appendChild(box2);
+        right.appendChild(f);
+        app.renderText(box2, v);
+      }
+
+      if (parsedOK) {
         if (pm.heading) right.appendChild(app.el('div', 'excerpt', pm.heading));
-        pm.sections.forEach(function (s) {
-          var f = app.el('div', 'field');
-          f.appendChild(app.el('div', 'k', s.key));
-          var v = app.el('div', 'v');
-          f.appendChild(v);
-          right.appendChild(f);
-          app.renderText(v, s.value);
-        });
+        secs.forEach(function (s) { addField(s.key, s.value); });
       } else {
         var f2 = app.el('div', 'field');
         f2.appendChild(app.el('div', 'k', '原文（未能按字段解析）'));
@@ -231,10 +278,11 @@ views.subject = (function () {
         f2.appendChild(raw);
         right.appendChild(f2);
         if (raw.textContent) app.math(raw);
+        if (d.analysis) addField('错因要点', d.analysis);
       }
       grid.appendChild(right);
 
-      box.appendChild(editor(d));
+      box.appendChild(editor(d, detailWrap));
       app.math(box);
     }).catch(function (e) {
       box.textContent = '';
@@ -242,7 +290,31 @@ views.subject = (function () {
     });
   }
 
-  function editor(d) {
+  // mdAnalysis —— md 里解析出的错因要点，用作编辑框的初值
+  function mdAnalysis(d) {
+    var secs = (d.parsed_md && d.parsed_md.parsed && d.parsed_md.sections) || [];
+    for (var i = 0; i < secs.length; i++) {
+      if (ANALYSIS_KEYS.indexOf(secs[i].key) >= 0) return secs[i].value;
+    }
+    return '';
+  }
+
+  // reload —— 改完不整页刷新（一刷新就回到列表顶、展开的详情也没了）：
+  // 重新拉一次列表，重画，然后把刚才那道题的详情重新打开。
+  function reload(id, detailWrap) {
+    return app.api('/api/entries?subject=' + encodeURIComponent(state.subject)).then(function (d2) {
+      state.items = d2.items || [];
+      state.facets = d2.facets || {};
+      repaint();
+      if (!id) return;
+      var hit = null;
+      state.items.forEach(function (x) { if (x.id === id) hit = x; });
+      if (hit && detailWrap) openDetail(hit, detailWrap);
+      else if (detailWrap) detailWrap.textContent = '';
+    });
+  }
+
+  function editor(d, detailWrap) {
     var wrap = app.el('div', 'editrow');
 
     var sel = document.createElement('select');
@@ -284,9 +356,14 @@ views.subject = (function () {
     var del = app.el('button', 'danger', '删除');
     wrap.appendChild(del);
 
+    var ana = document.createElement('textarea');
+    ana.value = d.analysis || mdAnalysis(d);
+    ana.placeholder = '错因要点（改了会覆盖 md 里解析出的那份；留空则仍显示 md 原文）';
+    wrap.appendChild(ana);
+
     var note = document.createElement('textarea');
     note.value = d.note || '';
-    note.placeholder = '备注 / 错因';
+    note.placeholder = '备注';
     wrap.appendChild(note);
 
     save.onclick = function () {
@@ -295,12 +372,13 @@ views.subject = (function () {
         result: sel.value,
         exam: exam.value.trim(),
         source: src.value,
+        analysis: ana.value,
         tags: tags.value.split(/[、,，\s]+/).filter(function (x) { return x; }),
         note: note.value
       };
       app.api('/api/entry', { method: 'PUT', body: body }).then(function () {
         app.toast('已保存');
-        location.reload();
+        return reload(d.id, detailWrap);
       }).catch(function (e) { app.toast('保存失败：' + e.message); });
     };
 
@@ -308,11 +386,123 @@ views.subject = (function () {
       if (!confirm('确认删除「' + (d.qno || d.id) + '」？索引里的这条记录会被移除（md 和原图保留）。')) return;
       app.api('/api/entry?id=' + encodeURIComponent(d.id), { method: 'DELETE' }).then(function () {
         app.toast('已删除');
-        location.reload();
+        return reload('', detailWrap);
       }).catch(function (e) { app.toast('删除失败：' + e.message); });
     };
 
     return wrap;
+  }
+
+  // ==========================================================================
+  // 导出
+  // ==========================================================================
+
+  function stamp() {
+    var d = new Date();
+    function p(x) { return (x < 10 ? '0' : '') + x; }
+    return '' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate());
+  }
+
+  function openExport() {
+    var cur = filtered();
+    var mask = app.el('div', 'mask');
+    var box = app.el('div', 'modal');
+
+    box.appendChild(app.el('h3', null, '导出「' + state.subject + '」错题本'));
+
+    // ---- 范围 ----
+    var scope = document.createElement('select');
+    scope.appendChild(opt('filtered', '当前筛选结果（' + cur.length + ' 题）'));
+    scope.appendChild(opt('all', '本科目全部（' + state.items.length + ' 题）'));
+    box.appendChild(mrow('范围', scope));
+
+    // ---- 格式 ----
+    var fmt = document.createElement('select');
+    FORMATS.forEach(function (f) { fmt.appendChild(opt(f[0], f[1])); });
+    box.appendChild(mrow('格式', fmt));
+
+    // ---- 内容 ----
+    var checks = {};
+    var grid = app.el('div', 'checks');
+    EXPORT_FIELDS.forEach(function (f) {
+      var lab = document.createElement('label');
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = DEFAULT_FIELDS.indexOf(f[0]) >= 0;
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode(f[1]));
+      grid.appendChild(lab);
+      checks[f[0]] = cb;
+    });
+    box.appendChild(mrow('导出内容', grid, true));
+
+    var hint = app.el('div', 'hint',
+      '原图：Markdown 里放 7 天有效的 COS 链接（不往 md 里塞 base64）；HTML / PDF 直接内嵌图片，单文件离线可看，文件会变大。');
+    box.appendChild(hint);
+
+    var err = app.el('div', 'hint err', '');
+    box.appendChild(err);
+
+    // ---- 按钮 ----
+    var foot = app.el('div', 'mfoot');
+    var cancel = app.el('button', 'ghost', '取消');
+    var go = app.el('button', 'primary', '导出');
+    foot.appendChild(cancel);
+    foot.appendChild(go);
+    box.appendChild(foot);
+
+    function close() { mask.remove(); }
+    cancel.onclick = close;
+    mask.onclick = function (e) { if (e.target === mask) close(); };
+
+    go.onclick = function () {
+      var fields = Object.keys(checks).filter(function (k) { return checks[k].checked; });
+      if (!fields.length) { err.textContent = '至少勾一项导出内容'; return; }
+      var ids = scope.value === 'filtered'
+        ? cur.map(function (it) { return it.id; })
+        : null;
+      if (ids && !ids.length) { err.textContent = '当前筛选结果为空'; return; }
+      if (!ids && !state.items.length) { err.textContent = '本科目没有题目'; return; }
+
+      err.textContent = '';
+      go.disabled = true;
+      go.textContent = '生成中…';
+
+      app.apiRaw('/api/export', {
+        method: 'POST',
+        body: {
+          subject: state.subject,
+          ids: ids,
+          format: fmt.value,
+          fields: fields,
+          with_image: fields.indexOf('image') >= 0
+        }
+      }).then(function (r) { return r.blob(); }).then(function (blob) {
+        close();
+        if (fmt.value === 'pdf') {
+          app.printHTML(blob);
+          app.toast('已生成打印页，在打印对话框里选「另存为 PDF」');
+        } else {
+          app.download(blob, '错题本-' + state.subject + '-' + stamp() + '.' + (fmt.value === 'md' ? 'md' : 'html'));
+          app.toast('已导出 ' + (ids ? ids.length : state.items.length) + ' 题');
+        }
+      }).catch(function (e) {
+        go.disabled = false;
+        go.textContent = '导出';
+        err.textContent = '导出失败：' + e.message;
+      });
+    };
+
+    mask.appendChild(box);
+    document.body.appendChild(mask);
+  }
+
+  // mrow —— 弹窗里的一行：左侧标签 + 右侧控件
+  function mrow(label, ctrl, wide) {
+    var r = app.el('div', 'mfield' + (wide ? ' wide' : ''));
+    r.appendChild(app.el('div', 'mlabel', label));
+    r.appendChild(ctrl);
+    return r;
   }
 
   return { render: render };

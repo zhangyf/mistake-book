@@ -198,6 +198,7 @@ func (s *server) handleEntry(w http.ResponseWriter, r *http.Request) {
 		"qtype":      found.Qtype,
 		"result":     normResult(found.Result),
 		"source":     found.Source,
+		"analysis":   found.Analysis,
 		"tags":       found.Tags,
 		"note":       found.Note,
 		"updated_at": found.UpdatedAt,

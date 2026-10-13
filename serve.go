@@ -97,6 +97,7 @@ func (s *server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/entries", s.requireAuth(s.handleEntries))
 	mux.HandleFunc("/api/entry", s.requireAuth(s.handleEntry))
 	mux.HandleFunc("/api/image", s.requireAuth(s.handleImage))
+	mux.HandleFunc("/api/export", s.requireAuth(s.handleExport))
 }
 
 // staticHandler 服务内嵌的前端资源，带内容 ETag 协商缓存。

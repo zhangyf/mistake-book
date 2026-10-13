@@ -49,7 +49,8 @@ func TestParseSingle(t *testing.T) {
 	if p.Heading != "第 4 题　选择题　✓" {
 		t.Errorf("heading=%q", p.Heading)
 	}
-	want := []string{"题干", "我的作答", "批改", "错因/要点"}
+	// 「批改」必须在解析时被丢掉（对错以索引的 result 为准）
+	want := []string{"题干", "我的作答", "错因/要点"}
 	if len(p.Sections) != len(want) {
 		t.Fatalf("sections=%d", len(p.Sections))
 	}
@@ -99,6 +100,22 @@ func TestParseEmpty(t *testing.T) {
 	p := ParseMarkdown("", "第1题")
 	if p.Parsed {
 		t.Errorf("空文档不应解析成功")
+	}
+}
+
+func TestParseDropsPigaifield(t *testing.T) {
+	// 历史 md 里的 **批改**： 不能显示出来，也不能把后续行吞进去
+	p := ParseMarkdown(sampleMD, "第4题")
+	if !p.Parsed {
+		t.Fatalf("应解析成功")
+	}
+	for _, s := range p.Sections {
+		if s.Key == "批改" {
+			t.Errorf("「批改」没被丢掉: %+v", p.Sections)
+		}
+		if strings.Contains(s.Value, "红笔圈出") {
+			t.Errorf("「批改」的内容被并进了别的字段: key=%q value=%q", s.Key, s.Value)
+		}
 	}
 }
 
