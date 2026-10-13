@@ -177,3 +177,20 @@ func TestParseUnknownLabelKept(t *testing.T) {
 		t.Errorf("未知标签丢了: %+v", p.Sections)
 	}
 }
+
+func TestPreviewTextReplacesFigureFence(t *testing.T) {
+	s := "已知数轴：\n```\n  M   O\n ─●───●─▶\n -1   0\n```\n求 p 的值。"
+	got := previewText(s, 90)
+	if strings.Contains(got, "```") || strings.Contains(got, "─●") {
+		t.Fatalf("预览不应包含字符画原文: %q", got)
+	}
+	if !strings.Contains(got, "（图示）") {
+		t.Fatalf("预览应包含图示占位: %q", got)
+	}
+	if got := previewText("前文\n```\n未闭合", 90); strings.Contains(got, "```") {
+		t.Fatalf("未闭合围栏不应进预览: %q", got)
+	}
+	if got := previewText("没有围栏的普通题干", 90); got != "没有围栏的普通题干" {
+		t.Fatalf("普通文本不应被改动: %q", got)
+	}
+}

@@ -131,14 +131,31 @@ var app = (function () {
     return e;
   }
 
-  // renderText —— 把一段纯文本渲染成段落/列表，再跑 KaTeX。
+  // renderText —— 把一段纯文本渲染成段落/列表/字符画代码块，再跑 KaTeX。
   // 只用 textContent 塞内容，绝不 innerHTML（题干来自 md 原文，防注入）。
+  // 三个反引号独占一行的围栏块按字符画处理：<pre> 等宽保留空格。
   function renderText(container, text) {
     container.textContent = '';
     var lines = (text || '').split('\n');
     var ul = null;
+    var pre = null;
     lines.forEach(function (line) {
+      if (pre !== null) {
+        if (/^\s*```/.test(line)) {
+          container.appendChild(pre);
+          pre = null;
+        } else {
+          pre.appendChild(document.createTextNode(line + '\n'));
+        }
+        return;
+      }
       var t = line.trim();
+      if (/^```/.test(t)) {
+        ul = null;
+        pre = document.createElement('pre');
+        pre.className = 'fig';
+        return;
+      }
       if (/^[-*]\s+/.test(t)) {
         if (!ul) { ul = el('ul'); container.appendChild(ul); }
         ul.appendChild(el('li', null, t.replace(/^[-*]\s+/, '')));
@@ -147,6 +164,7 @@ var app = (function () {
         if (t) container.appendChild(el('p', null, line));
       }
     });
+    if (pre) container.appendChild(pre); // 未闭合围栏也照常显示，别吞内容
     math(container);
   }
 

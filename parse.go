@@ -118,6 +118,14 @@ func parseImportedMarkdown(md, qno string) (ParsedMD, bool) {
 // 折叠空白压成一行；截断时如果 $ 落单（公式被切断），退回到最后一个 $ 之前，
 // 免得卡片上出现半个公式渲染不出来。
 func previewText(s string, n int) string {
+	// 字符画围栏块在预览里只会变乱码，整体替换成一个占位词。
+	if i := strings.Index(s, "```"); i >= 0 {
+		if j := strings.Index(s[i+3:], "```"); j >= 0 {
+			s = s[:i] + "（图示）" + s[i+3+j+3:]
+		} else {
+			s = s[:i] // 未闭合围栏同样不进预览
+		}
+	}
 	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
 	r := []rune(s)
 	if len(r) <= n {

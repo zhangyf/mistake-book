@@ -134,6 +134,13 @@ input[type=text].search { min-width: 180px; }
 .field .v { white-space: pre-wrap; overflow-wrap: anywhere; }
 .field .v ul { margin: 4px 0; padding-left: 20px; }
 .field .v p { margin: 4px 0; }
+/* 字符画图示（数轴等）：等宽、保留空格、宽了横向滚 */
+.field .v pre.fig, .import-math-preview pre.fig {
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;
+  font-size: 13px; line-height: 1.45; white-space: pre; overflow-wrap: normal;
+  overflow-x: auto; background: #fbfbfc; border: 1px solid var(--line);
+  border-radius: 6px; padding: 8px 10px; margin: 6px 0;
+}
 .raw { white-space: pre-wrap; background: #fbfbfc; border: 1px solid var(--line); padding: 10px; border-radius: 6px; font-size: 13px; }
 
 /* 详情底部：查看态的操作行 / 编辑态的表单 */

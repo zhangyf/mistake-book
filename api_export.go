@@ -414,6 +414,7 @@ table.meta th { background: #f5f7fa; color: var(--muted); font-weight: 600;
 .boxk { font-weight: 700; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .stembox .v, .refbox .v { white-space: pre-wrap; overflow-wrap: anywhere; }
 .stembox .v p, .refbox .v p, .f .v p { margin: 4px 0; }
+.v pre.fig { font-family: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace; font-size: 12px; line-height: 1.45; white-space: pre; overflow-x: auto; background: #f6f7f9; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 6px 0; }
 .stembox .v ul, .refbox .v ul, .f .v ul { margin: 4px 0; padding-left: 20px; }
 .blank { flex: 1; min-height: 110px; border-top: 1px dashed var(--line); margin-top: 10px; }
 
@@ -479,12 +480,40 @@ func metaTable(it exportItem) string {
 	return b.String()
 }
 
-// htmlValue 把一段纯文本按行渲染成 <p>/<ul>，全部 textContent 级转义。
+// htmlValue 把一段纯文本按行渲染成 <p>/<ul>/<pre>，全部 textContent 级转义。
+// 三个反引号独占一行的围栏块按字符画处理：<pre class="fig"> 等宽保留空格。
 func htmlValue(v string) string {
 	var b strings.Builder
+	writeHTMLValue(&b, v)
+	return b.String()
+}
+
+func writeHTMLValue(b *strings.Builder, v string) {
 	inUL := false
+	inFig := false
+	flushUL := func() {
+		if inUL {
+			b.WriteString("</ul>")
+			inUL = false
+		}
+	}
 	for _, ln := range strings.Split(v, "\n") {
 		t := strings.TrimSpace(ln)
+		if inFig {
+			if strings.HasPrefix(t, "```") {
+				b.WriteString("</pre>")
+				inFig = false
+			} else {
+				b.WriteString(html.EscapeString(ln) + "\n")
+			}
+			continue
+		}
+		if strings.HasPrefix(t, "```") {
+			flushUL()
+			b.WriteString(`<pre class="fig">`)
+			inFig = true
+			continue
+		}
 		if t == "" {
 			continue
 		}
@@ -496,16 +525,13 @@ func htmlValue(v string) string {
 			b.WriteString("<li>" + html.EscapeString(strings.TrimSpace(t[2:])) + "</li>")
 			continue
 		}
-		if inUL {
-			b.WriteString("</ul>")
-			inUL = false
-		}
+		flushUL()
 		b.WriteString("<p>" + html.EscapeString(ln) + "</p>")
 	}
-	if inUL {
-		b.WriteString("</ul>")
+	if inFig {
+		b.WriteString("</pre>")
 	}
-	return b.String()
+	flushUL()
 }
 
 // refBox 汇总「参考」字段：我的作答 / 答案正解 / 错因要点 / 其他字段 / 原图。
@@ -617,29 +643,7 @@ func htmlField(b *strings.Builder, fields map[string]bool, id, label, val string
 		return
 	}
 	b.WriteString("<div class=\"f\"><div class=\"k\">" + html.EscapeString(label) + "</div><div class=\"v\">")
-	inUL := false
-	for _, ln := range strings.Split(v, "\n") {
-		t := strings.TrimSpace(ln)
-		if t == "" {
-			continue
-		}
-		if strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ") {
-			if !inUL {
-				b.WriteString("<ul>")
-				inUL = true
-			}
-			b.WriteString("<li>" + html.EscapeString(strings.TrimSpace(t[2:])) + "</li>")
-			continue
-		}
-		if inUL {
-			b.WriteString("</ul>")
-			inUL = false
-		}
-		b.WriteString("<p>" + html.EscapeString(ln) + "</p>")
-	}
-	if inUL {
-		b.WriteString("</ul>")
-	}
+	writeHTMLValue(b, v)
 	b.WriteString("</div></div>\n")
 }
 

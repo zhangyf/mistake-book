@@ -796,3 +796,20 @@ test('首页和科目页入口正确且重复路由不叠加首页', async () =>
   assert.equal(byClass(f.main, 'home-import').length, 1);
   assert.equal(byClass(f.main, 'cards').length, 1);
 });
+
+test('题干中的字符画围栏渲染为等宽 pre，不显示反引号', async () => {
+  const f = fixture(); await flush();
+  const box = f.context.document.createElement('div');
+  f.context.app.renderText(box, '已知数轴：\n```\n  M   O\n ─●───●─▶\n -1   0\n```\n求 $p$。');
+  const pre = byClass(box, 'fig')[0];
+  assert.ok(pre, '应渲染出 pre.fig');
+  assert.match(pre.textContent, /─●───●─▶/);
+  assert.equal(box.textContent.includes('```'), false);
+  const paras = box.children.filter(c => c.tagName === 'p');
+  assert.equal(paras.length, 2, '围栏外的文字照常成段');
+  // 未闭合围栏也要显示，不能吞掉
+  const box2 = f.context.document.createElement('div');
+  f.context.app.renderText(box2, '前文\n```\n  ─●─▶');
+  assert.equal(byClass(box2, 'fig').length, 1);
+  assert.match(byClass(box2, 'fig')[0].textContent, /─●─▶/);
+});
