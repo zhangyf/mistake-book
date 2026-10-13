@@ -134,6 +134,9 @@ input[type=text].search { min-width: 180px; }
 .field .v { white-space: pre-wrap; overflow-wrap: anywhere; }
 .field .v ul { margin: 4px 0; padding-left: 20px; }
 .field .v p { margin: 4px 0; }
+/* 编辑态的题干/作答：等宽，字符画对得齐；预览区复用导入页样式 */
+.editform .mdeditor { display: flex; flex-direction: column; gap: 6px; min-width: 0; width: 100%; }
+.editform textarea.stem-input { font-family: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace; font-size: 13px; line-height: 1.5; min-height: 120px; }
 /* 字符画图示（数轴等）：等宽、保留空格、宽了横向滚 */
 .field .v pre.fig, .import-math-preview pre.fig {
   font-family: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace;

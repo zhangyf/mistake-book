@@ -366,8 +366,45 @@ views.subject = (function () {
     return r;
   }
 
+  // mdSection —— md 里解析出的某个字段原文，用作编辑框初值
+  function mdSection(d, keys) {
+    var secs = (d.parsed_md && d.parsed_md.parsed && d.parsed_md.sections) || [];
+    for (var i = 0; i < secs.length; i++) {
+      if (keys.indexOf(secs[i].key) >= 0) return secs[i].value;
+    }
+    return '';
+  }
+
+  // mdEditor —— 题干/作答编辑器：文本框 + 一个「公式预览」按钮（公式与字符画都能看）
+  function mdEditor(label, value, placeholder) {
+    var wrap = app.el('div', 'mdeditor');
+    var ta = document.createElement('textarea');
+    ta.className = 'stem-input';
+    ta.value = value || '';
+    ta.placeholder = placeholder || '';
+    wrap.appendChild(ta);
+    var preview = app.el('div', 'import-math-preview');
+    var btn = app.el('button', 'ghost import-preview', '公式预览');
+    btn.onclick = function () { app.renderText(preview, ta.value); };
+    wrap.appendChild(btn);
+    wrap.appendChild(preview);
+    return { node: wrap, input: ta };
+  }
+
   function editor(d, detailWrap) {
     var form = app.el('div', 'editform');
+
+    // 题干与我的作答存在 md 里，改它们会重写题目原文
+    var stemBox = mdEditor('题干', mdSection(d, ['题干', '题目']),
+      '公式用 $…$；图形用三个反引号围栏的字符画');
+    form.appendChild(frow('题干', stemBox.node, true));
+
+    var ansBox = mdEditor('我的作答', mdSection(d, ['我的作答', '作答', '我的答案']),
+      '手写作答，多行照抄');
+    form.appendChild(frow('我的作答', ansBox.node, true));
+
+    var stem0 = stemBox.input.value;
+    var ans0 = ansBox.input.value;
 
     // 没有「对错」这一项：错题本里全是要重做的，标对错没意义
     var exam = document.createElement('input');
@@ -418,6 +455,9 @@ views.subject = (function () {
         tags: tags.value.split(/[、,，\s]+/).filter(function (x) { return x; }),
         note: note.value
       };
+      // 题干/作答只在实际改动时才提交，避免每次保存都重写 md
+      if (stemBox.input.value !== stem0) body.stem = stemBox.input.value;
+      if (ansBox.input.value !== ans0) body.student_answer = ansBox.input.value;
       app.api('/api/entry', { method: 'PUT', body: body }).then(function () {
         app.toast('已保存');
         return reload(d.id, detailWrap);

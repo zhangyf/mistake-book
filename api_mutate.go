@@ -64,13 +64,15 @@ func (s *server) mutate(apply func(idx *Index) error, verify func(idx *Index) bo
 }
 
 type updateReq struct {
-	ID       string   `json:"id"`
-	Result   string   `json:"result"`
-	Exam     string   `json:"exam"`
-	Source   string   `json:"source"`
-	Analysis string   `json:"analysis"` // 错因要点：手改后覆盖 md 里解析出的「错因/要点」
-	Tags     []string `json:"tags"`
-	Note     string   `json:"note"`
+	ID            string   `json:"id"`
+	Result        string   `json:"result"`
+	Exam          string   `json:"exam"`
+	Source        string   `json:"source"`
+	Analysis      string   `json:"analysis"` // 错因要点：手改后覆盖 md 里解析出的「错因/要点」
+	Tags          []string `json:"tags"`
+	Note          string   `json:"note"`
+	Stem          string   `json:"stem"`          // 题干：存在 md 里，改它需要重写 md
+	StudentAnswer string   `json:"student_answer"` // 我的作答：同上
 }
 
 // PUT /api/entry  body: {"id":..., "result":"wrong", "tags":[...], "note":"..."}
@@ -93,6 +95,8 @@ func (s *server) updateEntry(w http.ResponseWriter, r *http.Request) {
 	_, hasExam := raw["exam"]
 	_, hasSource := raw["source"]
 	_, hasAnalysis := raw["analysis"]
+	_, hasStem := raw["stem"]
+	_, hasAnswer := raw["student_answer"]
 
 	switch req.Source {
 	case "", "校内作业", "课外班作业", "校内考试", "自我复习":
@@ -110,6 +114,71 @@ func (s *server) updateEntry(w http.ResponseWriter, r *http.Request) {
 		default:
 			failJSON(w, 400, "result 只能是 correct/wrong/unknown")
 			return
+		}
+	}
+
+	// 题干 / 我的作答存在 md 里，不在索引里：先重写 md 再动索引，
+	// 写失败就直接返回，索引一点不动。
+	mdBytes := 0
+	if hasStem || hasAnswer {
+		idx, err := s.st.GetIndex(bgctx())
+		if err != nil {
+			failJSON(w, 500, "读取索引失败: "+err.Error())
+			return
+		}
+		var mdKey, qno string
+		for _, it := range idx.Items {
+			if it.ID == req.ID {
+				mdKey, qno = it.MdKey, it.Qno
+				break
+			}
+		}
+		if mdKey == "" {
+			failJSON(w, 404, "索引里没有 id="+req.ID)
+			return
+		}
+		data, err := s.st.GetAll(bgctx(), mdKey)
+		if err != nil {
+			failJSON(w, 500, "读取题目原文失败: "+err.Error())
+			return
+		}
+		var setStem, setAnswer *string
+		if hasStem {
+			v := req.Stem
+			setStem = &v
+		}
+		if hasAnswer {
+			v := req.StudentAnswer
+			setAnswer = &v
+		}
+		out, err := rewrittenVerified(data, qno, setStem, setAnswer)
+		if err != nil {
+			failJSON(w, 400, "改写题目原文失败: "+err.Error())
+			return
+		}
+		mdBytes = len(out)
+		if !s.dryRun {
+			if err := s.st.PutBytes(bgctx(), mdKey, out); err != nil {
+				failJSON(w, 500, "写回题目原文失败: "+err.Error())
+				return
+			}
+			back, err := s.st.GetAll(bgctx(), mdKey)
+			if err != nil {
+				failJSON(w, 500, "写回后回读失败: "+err.Error())
+				return
+			}
+			if setStem != nil {
+				if got, ok := parsedMDSection(back, qno, stemKeys); !ok || got != *setStem {
+					failJSON(w, 500, "题干写回后校验不一致，请重试")
+					return
+				}
+			}
+			if setAnswer != nil {
+				if got, ok := parsedMDSection(back, qno, answerKeys); !ok || got != *setAnswer {
+					failJSON(w, 500, "我的作答写回后校验不一致，请重试")
+					return
+				}
+			}
 		}
 	}
 
@@ -182,6 +251,7 @@ func (s *server) updateEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]interface{}{
 		"success": true, "id": req.ID, "updated_at": now, "dry_run": s.dryRun,
+		"md_updated": hasStem || hasAnswer, "md_bytes": mdBytes,
 	})
 }
 
