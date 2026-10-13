@@ -1075,6 +1075,67 @@ test('导出弹窗支持手动选题：勾谁导谁（2026-10-13）', async () =
   assert.deepEqual(JSON.parse(post2.options.body).ids, ['e1', 'e3'], '勾谁导谁');
 });
 
+test('导出手动选题可按知识点/题型/时间筛选清单（2026-10-13）', async () => {
+  const mk = (id, qno, qtype, date, tags) => ({
+    id, subject: '数学', exam: '有理数', date, qno, qtype, result: 'unknown',
+    source: '', tags, note: '', preview: '预览' + id, image_key: '', md_key: 'md' + id
+  });
+  const f = fixture({
+    hash: '#/subject/数学',
+    entries: {
+      items: [
+        mk('e1', '第1题', '填空题', '2026-10-12', ['数轴']),
+        mk('e2', '第2题', '解答题', '2026-10-12', ['数轴', '绝对值']),
+        mk('e3', '第3题', '解答题', '2026-10-13', ['绝对值'])
+      ],
+      facets: { tags: {}, qtype: {}, result: {}, exam: {}, source: {} }
+    }
+  });
+  await flush();
+  click(buttonWith(f.main, '导出'));
+  const mask = byClass(f.body, 'mask').pop();
+  input(all(mask, e => e.tagName === 'select')[0], 'manual');   // 第一个 select 是「范围」
+  assert.equal(byClass(mask, 'pickitem').length, 3, '默认列出全部题');
+
+  const visible = () => byClass(mask, 'pickitem').filter(l => l.style.display !== 'none');
+  const chips = byClass(mask, 'pchip');
+  assert.equal(chips.length, 2, '知识点 chips：数轴、绝对值');
+
+  // 点「数轴」chip → 只剩 e1、e2；全选只勾可见两题 → 导出 e1、e2
+  click(chips.find(c => c.textContent === '数轴'));
+  assert.ok(chips.find(c => c.textContent === '数轴').className.includes('on'), '选中的 chip 高亮');
+  assert.equal(visible().length, 2, '知识点筛掉 e3');
+  click(buttonWith(f.body, '全选'));
+  click(buttonWith(f.body, '导出'));
+  await flush();
+  const post = f.calls.find(c => c.url === '/api/export');
+  assert.deepEqual(JSON.parse(post.options.body).ids.sort(), ['e1', 'e2'], '全选只勾筛选后可见的题');
+
+  // 重新打开：时间选 2026-10-13 → 只剩 e3
+  click(buttonWith(f.main, '导出'));
+  const mask2 = byClass(f.body, 'mask').pop();
+  const sels2 = all(mask2, e => e.tagName === 'select');
+  input(sels2[0], 'manual');
+  input(sels2[2], '2026-10-13');   // 第 2、3 个 select 是题型、时间
+  assert.equal(byClass(mask2, 'pickitem').filter(l => l.style.display !== 'none').length, 1, '时间筛到 e3');
+  click(buttonWith(f.body, '全选'));
+  click(buttonWith(f.body, '导出'));
+  await flush();
+  assert.deepEqual(JSON.parse(f.calls.filter(c => c.url === '/api/export').pop().options.body).ids, ['e3'], '按时间导出');
+
+  // 组合筛选无匹配 → 提示，且不能导出
+  click(buttonWith(f.main, '导出'));
+  const mask3 = byClass(f.body, 'mask').pop();
+  const sels3 = all(mask3, e => e.tagName === 'select');
+  input(sels3[0], 'manual');
+  input(sels3[1], '填空题');       // 题型
+  input(sels3[2], '2026-10-13');   // 时间：填空题都在 10-12 → 无匹配
+  assert.equal(byClass(mask3, 'pickitem').filter(l => l.style.display !== 'none').length, 0, '组合筛选无匹配');
+  assert.match(byClass(mask3, 'hint')[0].textContent, /没有符合筛选条件/, '空清单要有提示');
+  click(buttonWith(f.body, '导出'));
+  assert.match(byClass(f.body, 'err')[0].textContent, /至少勾一道题/);
+});
+
 test('导入草稿里框选题图，写 @photo 占位随题干进确认请求', async () => {
   const f = await readyFixture();
   const p = f.photos()[0];

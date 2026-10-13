@@ -560,16 +560,52 @@ views.subject = (function () {
 
     box.appendChild(app.el('h3', null, '导出「' + state.subject + '」错题本'));
 
-    // ---- 范围 ----
+    // ---- 范围（2026-10-13 老师：清单里已有全选/清空，下拉里不再放「本科目全部」）----
     var scope = document.createElement('select');
     scope.appendChild(opt('filtered', '当前筛选结果（' + cur.length + ' 题）'));
-    scope.appendChild(opt('all', '本科目全部（' + state.items.length + ' 题）'));
     scope.appendChild(opt('manual', '手动选题（自己勾）'));
     box.appendChild(mrow('范围', scope));
 
-    // ---- 手动选题清单（选了「手动选题」才展开）----
+    // ---- 手动选题：筛选条件（知识点/题型/时间）+ 勾选清单（选了「手动选题」才展开）----
     var pickWrap = app.el('div', 'pickwrap');
     pickWrap.style.display = 'none';
+
+    var pick = { tags: [], qtype: '', date: '' };
+    var allTags = [], allTypes = [], allDates = [];
+    state.items.forEach(function (it2) {
+      (it2.tags || []).forEach(function (t) { if (allTags.indexOf(t) < 0) allTags.push(t); });
+      if (it2.qtype && allTypes.indexOf(it2.qtype) < 0) allTypes.push(it2.qtype);
+      if (it2.date && allDates.indexOf(it2.date) < 0) allDates.push(it2.date);
+    });
+    allTags.sort();
+    allTypes.sort();
+    allDates.sort().reverse();   // 最近的日期排前面
+
+    // 筛选条件行：知识点 chips（多选，命中任意一个即可）+ 题型下拉 + 日期下拉
+    var fbar = app.el('div', 'pickfilters');
+    fbar.appendChild(app.el('span', 'pflabel', '筛选'));
+    allTags.forEach(function (t) {
+      var c = app.el('button', 'pchip', t);
+      c.type = 'button';
+      c.onclick = function () {
+        var i = pick.tags.indexOf(t);
+        if (i >= 0) { pick.tags.splice(i, 1); c.className = 'pchip'; }
+        else { pick.tags.push(t); c.className = 'pchip on'; }
+        repaintPick();
+      };
+      fbar.appendChild(c);
+    });
+    var typeSel = document.createElement('select');
+    typeSel.appendChild(opt('', '全部题型'));
+    allTypes.forEach(function (t) { typeSel.appendChild(opt(t, t)); });
+    typeSel.onchange = function () { pick.qtype = typeSel.value; repaintPick(); };
+    fbar.appendChild(typeSel);
+    var dateSel = document.createElement('select');
+    dateSel.appendChild(opt('', '全部时间'));
+    allDates.forEach(function (dt) { dateSel.appendChild(opt(dt, dt)); });
+    dateSel.onchange = function () { pick.date = dateSel.value; repaintPick(); };
+    fbar.appendChild(dateSel);
+    pickWrap.appendChild(fbar);
 
     var pickBar = app.el('div', 'pickbar');
     var pickCount = app.el('span', 'pickcount', '已选 0 题');
@@ -581,8 +617,9 @@ views.subject = (function () {
     pickWrap.appendChild(pickBar);
 
     var checks2 = {};
+    var rows = [];
     var pickList = app.el('div', 'picklist');
-    cur.forEach(function (it2) {
+    state.items.forEach(function (it2) {
       var lab = document.createElement('label');
       lab.className = 'pickitem';
       var cb = document.createElement('input');
@@ -595,19 +632,42 @@ views.subject = (function () {
       lab.appendChild(txt);
       pickList.appendChild(lab);
       checks2[it2.id] = cb;
+      rows.push({ it: it2, lab: lab, cb: cb });
       cb.onchange = syncCount;
     });
     pickWrap.appendChild(pickList);
-    if (!cur.length) {
-      pickWrap.appendChild(app.el('div', 'hint', '当前筛选结果为空，先调整筛选或换「本科目全部」。'));
-    }
 
+    var emptyHint = app.el('div', 'hint', '');
+    emptyHint.style.display = 'none';
+    pickWrap.appendChild(emptyHint);
+
+    function pickMatch(it2) {
+      if (pick.qtype && it2.qtype !== pick.qtype) return false;
+      if (pick.date && it2.date !== pick.date) return false;
+      if (pick.tags.length) {
+        var hit = pick.tags.some(function (t) { return (it2.tags || []).indexOf(t) >= 0; });
+        if (!hit) return false;
+      }
+      return true;
+    }
+    function repaintPick() {
+      var shown = 0;
+      rows.forEach(function (r) {
+        var ok = pickMatch(r.it);
+        r.lab.style.display = ok ? '' : 'none';
+        if (ok) shown++;
+      });
+      emptyHint.textContent = shown ? '' : (state.items.length ? '没有符合筛选条件的题目，调整一下筛选。' : '本科目还没有题目。');
+      emptyHint.style.display = shown ? 'none' : '';
+      syncCount();
+    }
     function syncCount() {
       var n = Object.keys(checks2).filter(function (k) { return checks2[k].checked; }).length;
       pickCount.textContent = '已选 ' + n + ' 题';
     }
+    // 全选只勾当前符合条件的（被筛掉的题不动），清空清掉全部
     allBtn.onclick = function () {
-      Object.keys(checks2).forEach(function (k) { checks2[k].checked = true; });
+      rows.forEach(function (r) { if (r.lab.style.display !== 'none') r.cb.checked = true; });
       syncCount();
     };
     noneBtn.onclick = function () {
@@ -615,7 +675,8 @@ views.subject = (function () {
       syncCount();
     };
     scope.onchange = function () {
-      pickWrap.style.display = scope.value === 'manual' ? '' : 'none';
+      if (scope.value === 'manual') { pickWrap.style.display = ''; repaintPick(); }
+      else pickWrap.style.display = 'none';
     };
     box.appendChild(mrow('题目', pickWrap, true));
 
@@ -672,15 +733,13 @@ views.subject = (function () {
     go.onclick = function () {
       var fields = Object.keys(checks).filter(function (k) { return checks[k].checked; });
       if (!fields.length) { err.textContent = '至少勾一项导出内容'; return; }
-      var ids = null;
+      var ids;
       if (scope.value === 'filtered') {
         ids = cur.map(function (it) { return it.id; });
         if (!ids.length) { err.textContent = '当前筛选结果为空'; return; }
-      } else if (scope.value === 'manual') {
+      } else {
         ids = Object.keys(checks2).filter(function (k) { return checks2[k].checked; });
         if (!ids.length) { err.textContent = '手动选题：至少勾一道题'; return; }
-      } else if (!state.items.length) {
-        err.textContent = '本科目没有题目'; return;
       }
 
       err.textContent = '';
@@ -699,7 +758,7 @@ views.subject = (function () {
         }
       }).then(function (r) { return r.blob(); }).then(function (blob) {
         close();
-        var n = ids ? ids.length : state.items.length;
+        var n = ids.length;
         app.download(blob, '错题本-' + state.subject + '-' + stamp() + '.' + (fmt.value === 'md' ? 'md' : 'html'));
         app.toast('已导出 ' + n + ' 题' + (fmt.value === 'html' ? '，打开文件后点右下角「打印」可另存为 PDF' : ''));
       }).catch(function (e) {
