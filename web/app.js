@@ -41,29 +41,51 @@ var app = (function () {
     setToken(t.trim());
   }
 
-  // api —— 统一带 Authorization 头；401 时提示重设 token
-  function api(path, opts) {
+  function requestJSON(path, opts, multipart) {
     opts = opts || {};
-    var headers = opts.headers || {};
-    // 必须用自定义头：线上前面还有 nginx Basic Auth，占用了 Authorization 头
+    var headers = {};
+    Object.keys(opts.headers || {}).forEach(function (key) {
+      // multipart 的 boundary 只能由浏览器生成。
+      if (!multipart || key.toLowerCase() !== 'content-type') headers[key] = opts.headers[key];
+    });
     if (token()) headers['X-Mistake-Token'] = token();
-    if (opts.body) headers['Content-Type'] = 'application/json';
+    if (!multipart && opts.body) headers['Content-Type'] = 'application/json';
     return fetch(path, {
-      method: opts.method || 'GET',
+      method: opts.method || (multipart ? 'POST' : 'GET'),
       headers: headers,
-      body: opts.body ? JSON.stringify(opts.body) : undefined
+      body: multipart ? opts.body : (opts.body ? JSON.stringify(opts.body) : undefined),
+      signal: opts.signal
     }).then(function (r) {
+      function responseError(message, serverRejected) {
+        var error = new Error(message);
+        error.status = r.status;
+        // 非 JSON 代理响应不能当成后端明确的写入前校验失败。
+        error.serverRejected = !!serverRejected;
+        return error;
+      }
       if (r.status === 401) {
         toast('token 不对，请重设');
         askToken();
-        throw new Error('unauthorized');
+        throw responseError('访问凭证无效，请重设 token 后重试');
       }
-      return r.json().then(function (d) {
-        if (!r.ok) throw new Error(d && d.error ? d.error : ('HTTP ' + r.status));
+      return r.json().catch(function (e) {
+        if (e.name === 'AbortError') throw e;
+        throw responseError('服务返回了非 JSON 响应（HTTP ' + r.status + '），请检查服务或代理后重试');
+      }).then(function (d) {
+        if (!r.ok || (d && d.success === false)) {
+          throw responseError(d && typeof d.error === 'string' ? d.error : ('请求失败（HTTP ' + r.status + '）'),
+            d && d.success === false && typeof d.error === 'string');
+        }
         return d;
       });
+    }).catch(function (e) {
+      if (e.name === 'TypeError') throw new Error('网络连接失败，请检查连接后重试');
+      throw e;
     });
   }
+
+  function api(path, opts) { return requestJSON(path, opts, false); }
+  function apiForm(path, opts) { return requestJSON(path, opts, true); }
 
   // apiRaw —— 导出用：要的是原始字节（md/html），不是 JSON
   function apiRaw(path, opts) {
@@ -154,18 +176,40 @@ var app = (function () {
   }
 
   // ---------- 路由 ----------
+  var activeHash = null;
+  var activeView = null;
   function route() {
-    var h = decodeURIComponent(location.hash || '#/');
+    var nextHash = location.hash || '#/';
+    if (nextHash === activeHash) return;
+    // 必须先问再销毁；取消跳转只还原 URL，不重建导入 DOM。
+    if (activeView && activeView.canLeave && !activeView.canLeave()) {
+      history.replaceState(null, '', location.pathname + location.search + activeHash);
+      return;
+    }
+    if (activeView && activeView.destroy) activeView.destroy();
+    activeView = null;
+    activeHash = nextHash;
+    var h;
+    try { h = decodeURIComponent(nextHash); } catch (e) { h = '#/'; }
     var main = document.getElementById('app');
     var crumb = document.getElementById('crumb');
     main.textContent = '';
+    var imp = h.match(/^#\/import(?:\/(.+))?$/);
     var m = h.match(/^#\/subject\/(.+)$/);
-    if (m) {
+    if (imp) {
+      crumb.textContent = '› 导入照片';
+      activeView = views.import.render(main, imp[1] || '');
+    } else if (m) {
       crumb.textContent = '› ' + m[1];
       views.subject.render(main, m[1]);
     } else {
       crumb.textContent = '';
       views.home.render(main);
+      var entry = el('div', 'toolbar home-import');
+      var button = el('button', 'primary', '导入照片');
+      button.onclick = function () { location.hash = '#/import'; };
+      entry.appendChild(button);
+      main.appendChild(entry);
     }
   }
 
@@ -179,7 +223,7 @@ var app = (function () {
   }
 
   return {
-    boot: boot, api: api, apiRaw: apiRaw, el: el, renderText: renderText, math: math,
+    boot: boot, api: api, apiForm: apiForm, apiRaw: apiRaw, el: el, renderText: renderText, math: math,
     toast: toast, setToken: setToken, token: token,
     download: download,
     // <img> 没法带自定义头，只能把 token 拼进 URL（后端也接受 ?token=）

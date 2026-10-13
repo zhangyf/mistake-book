@@ -47,6 +47,9 @@ type ParsedMD struct {
 // ParseMarkdown 从一张照片的 md 里取出 qno 对应的那道题。
 // qno 形如 "第4题"；匹配不到就取第一块，再没有就整篇。
 func ParseMarkdown(md, qno string) ParsedMD {
+	if parsed, ok := parseImportedMarkdown(md, qno); ok {
+		return parsed
+	}
 	body := frontMatterRe.ReplaceAllString(md, "")
 	body = strings.TrimSpace(body)
 	if body == "" {
@@ -65,6 +68,50 @@ func ParseMarkdown(md, qno string) ParsedMD {
 		return ParsedMD{Parsed: false, Heading: b.heading, Raw: raw}
 	}
 	return ParsedMD{Parsed: true, Heading: b.heading, Sections: sec}
+}
+
+// parseImportedMarkdown 读取网页导入生成的无损数据标记。
+// 人工编辑的正文可能恰好包含 Markdown 标题/字段标签，不能再按这些内容切题。
+// 新格式严格按题号匹配；缺题或标记损坏时不回退到另一道题。旧 Markdown 仍走原解析器。
+func parseImportedMarkdown(md, qno string) (ParsedMD, bool) {
+	body := strings.TrimSpace(md)
+	if !strings.HasPrefix(body, importMarkdownPrefix) {
+		return ParsedMD{}, false
+	}
+	line, _, _ := strings.Cut(body, "\n")
+	line = strings.TrimSuffix(line, "\r")
+	invalid := ParsedMD{Raw: "导入题目记录损坏，无法读取；请核对原始 Markdown。"}
+	if !strings.HasSuffix(line, importMarkdownSuffix) || len(line) > maxImportMetadataBytes*2 {
+		return invalid, true
+	}
+	data := strings.TrimSuffix(strings.TrimPrefix(line, importMarkdownPrefix), importMarkdownSuffix)
+	var doc importMarkdownDocument
+	if decodeImportJSON([]byte(data), &doc) != nil || doc.Version != 1 || len(doc.Questions) == 0 || len(doc.Questions) > maxImportQuestions {
+		return invalid, true
+	}
+	want := normalizeImportQno(qno)
+	seen := map[string]bool{}
+	var found *importQuestion
+	for i := range doc.Questions {
+		q := &doc.Questions[i]
+		key := normalizeImportQno(q.Qno)
+		if !validImportText(q.Qno, 64, true, true) || !validImportText(q.Stem, 12000, true, false) ||
+			!validImportText(q.StudentAnswer, 8000, false, false) || seen[key] {
+			return invalid, true
+		}
+		seen[key] = true
+		if key == want || (want == "" && len(doc.Questions) == 1) {
+			found = q
+		}
+	}
+	if found == nil {
+		return ParsedMD{Raw: "此照片中未找到题号「" + qno + "」，请核对索引与原文。"}, true
+	}
+	sections := []Section{{Key: "题干", Value: found.Stem}, {Key: "我的作答", Value: found.StudentAnswer}}
+	if found.Analysis != "" {
+		sections = append(sections, Section{Key: "错因/要点", Value: found.Analysis})
+	}
+	return ParsedMD{Parsed: true, Heading: found.Qno, Sections: sections}, true
 }
 
 // previewText 取题干的一段预览，给列表卡片用（列表页不该显示整道题）。

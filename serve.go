@@ -30,6 +30,7 @@ type server struct {
 	st     *Storage
 	token  string
 	dryRun bool
+	vision *visionClient
 }
 
 func runServe(args []string) {
@@ -55,7 +56,7 @@ func runServe(args []string) {
 		os.Exit(1)
 	}
 
-	srv := &server{st: st, token: strings.TrimSpace(*token), dryRun: *dryRun}
+	srv := &server{st: st, token: strings.TrimSpace(*token), dryRun: *dryRun, vision: newVisionClient(visionConfigFromEnv())}
 
 	sub, err := fs.Sub(webFS, "web")
 	if err != nil {
@@ -99,6 +100,9 @@ func (s *server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/entry", s.requireAuth(s.handleEntry))
 	mux.HandleFunc("/api/image", s.requireAuth(s.handleImage))
 	mux.HandleFunc("/api/export", s.requireAuth(s.handleExport))
+	mux.HandleFunc("/api/import/config", s.requireAuth(s.handleImportConfig))
+	mux.HandleFunc("/api/import/recognize", s.requireAuth(importSameOrigin(s.handleImportRecognize)))
+	mux.HandleFunc("/api/import/confirm", s.requireAuth(importSameOrigin(s.handleImportConfirm)))
 }
 
 // staticHandler 服务内嵌的前端资源，带内容 ETag 协商缓存。

@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -14,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	cos "github.com/tencentyun/cos-go-sdk-v5"
 	"github.com/zhangyf/objstore"
 )
 
@@ -168,9 +172,16 @@ func parseEnvFile(content string) map[string]string {
 
 // Index 是 exam-bank/index.json 的结构。
 type Index struct {
-	Version int               `json:"version"`
-	Items   []Entry           `json:"items"`
-	Names   map[string]string `json:"names,omitempty"` // 科目 → 错题本显示名（老师自己起的，空 = 用科目名）
+	Version int                      `json:"version"`
+	Items   []Entry                  `json:"items"`
+	Names   map[string]string        `json:"names,omitempty"` // 科目 → 错题本显示名（老师自己起的，空 = 用科目名）
+	Imports map[string]ImportReceipt `json:"imports,omitempty"`
+}
+
+// ImportReceipt 与条目在同一次索引写入中持久化；编辑、删除题目不删除回执。
+type ImportReceipt struct {
+	PayloadHash string   `json:"payload_sha256"`
+	IDs         []string `json:"ids"`
 }
 
 // DisplayName 取某科目错题本的显示名：老师起过就用他的，否则用科目名。
@@ -200,15 +211,34 @@ type Entry struct {
 	UpdatedAt string   `json:"updated_at,omitempty"`
 }
 
-// GetIndex 下载索引；不存在时返回空索引。
+// objectNotFound 只接受 COS 明确的对象缺失，桶缺失、权限和网络错误均不能当空库。
+// objstore v0.17.0 没有 IsNotFound，GetAll 原样返回现有 COS SDK 的错误。
+func objectNotFound(err error) bool {
+	var ce *cos.ErrorResponse
+	return errors.As(err, &ce) && ce != nil && ce.Response != nil &&
+		ce.Response.StatusCode == http.StatusNotFound && ce.Code == "NoSuchKey"
+}
+
+// GetIndex 下载索引；仅对象确实不存在时返回空索引。
 func (s *Storage) GetIndex(ctx context.Context) (*Index, error) {
 	data, err := s.store.GetAll(ctx, indexKey)
-	if err != nil || len(data) == 0 {
-		return &Index{Version: 1, Names: map[string]string{}}, nil
+	if err != nil {
+		if objectNotFound(err) {
+			return &Index{Version: 1, Items: []Entry{}, Names: map[string]string{}}, nil
+		}
+		return nil, errors.New("读取索引失败，已停止写入")
+	}
+	var raw map[string]json.RawMessage
+	if err := decodeImportJSON(data, &raw); err != nil || raw == nil {
+		return nil, errors.New("索引内容无效，已停止写入")
+	}
+	items := bytes.TrimSpace(raw["items"])
+	if len(items) == 0 || items[0] != '[' {
+		return nil, errors.New("索引缺少有效 items 数组，已停止写入")
 	}
 	var idx Index
 	if err := json.Unmarshal(data, &idx); err != nil {
-		return nil, fmt.Errorf("解析 index.json 失败: %w", err)
+		return nil, errors.New("解析索引失败，已停止写入")
 	}
 	if idx.Version == 0 {
 		idx.Version = 1
@@ -221,7 +251,14 @@ func (s *Storage) GetIndex(ctx context.Context) (*Index, error) {
 
 // PutIndex 上传索引。
 func (s *Storage) PutIndex(ctx context.Context, idx *Index) error {
-	data, err := json.MarshalIndent(idx, "", "  ")
+	if idx == nil {
+		return errors.New("不能写入空索引")
+	}
+	out := *idx
+	if out.Items == nil {
+		out.Items = []Entry{}
+	}
+	data, err := json.MarshalIndent(&out, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -325,6 +362,11 @@ func (s *Storage) PutFile(ctx context.Context, key, localPath string) error {
 	if err != nil {
 		return fmt.Errorf("读取本地文件失败 %s: %w", localPath, err)
 	}
+	return s.store.PutObject(ctx, key, data)
+}
+
+// PutBytes 直接上传内存数据，导入路径不创建本地文件。
+func (s *Storage) PutBytes(ctx context.Context, key string, data []byte) error {
 	return s.store.PutObject(ctx, key, data)
 }
 

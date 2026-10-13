@@ -180,3 +180,49 @@ input[type=text].search { min-width: 180px; }
   font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s;
 }
 .toast.show { opacity: .95; }
+
+/* 照片导入：样式限于独立页面，不改变已有编辑器。 */
+.home-import { margin-top: 18px; }
+.import-page h2 { margin-top: 0; }
+.import-page button:disabled { opacity: .5; cursor: not-allowed; }
+.import-page input:disabled, .import-page textarea:disabled, .import-page select:disabled { background: var(--bg); color: var(--muted); }
+.import-page fieldset { min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+.import-page legend { font-weight: 600; padding: 0 6px; }
+.import-metadata { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.import-field { display: flex; flex-direction: column; gap: 5px; margin: 10px 0; min-width: 0; }
+.import-label { font-size: 13px; font-weight: 600; }
+.import-field input:not([type=checkbox]), .import-field select, .import-field textarea { width: 100%; min-width: 0; font: inherit; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; }
+.import-field input[type=checkbox] { align-self: flex-start; width: 20px; height: 20px; margin: 0; }
+.import-field textarea { resize: vertical; min-height: 90px; }
+.import-summary { font-weight: 600; }
+.import-caution { border-left: 4px solid var(--accent); }
+.import-cards { display: grid; gap: 20px; }
+.import-photo { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; min-width: 0; }
+.import-photo-head { display: flex; align-items: baseline; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
+.import-photo-head h3 { margin: 0 0 12px; min-width: 0; max-width: 100%; font-size: 16px; overflow-wrap: anywhere; }
+.import-photo-layout { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); align-items: start; gap: 20px; min-width: 0; }
+.import-photo-reference { position: sticky; top: 80px; align-self: start; min-width: 0; max-height: calc(100vh - 100px); overflow-y: auto; }
+.import-photo-editor, .import-questions { min-width: 0; max-width: 100%; }
+.import-photo-editor > .hint:first-child { margin-top: 0; }
+.import-status { border-radius: 20px; padding: 2px 10px; font-size: 13px; background: var(--chip); }
+.import-status-success { color: var(--correct); background: #e7f6ee; }
+.import-status-failed, .import-status-uncertain { color: var(--wrong); background: #fdecea; }
+.import-status-confirming, .import-status-recognizing { color: var(--accent); background: #eff6ff; }
+.import-original { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; min-width: 0; color: var(--accent); font-size: 13px; overflow-wrap: anywhere; }
+.import-original img { display: block; max-width: 100%; max-height: min(48vh, 480px); object-fit: contain; border: 1px solid var(--line); border-radius: 6px; }
+.import-question { margin: 14px 0; width: 100%; min-width: 0; }
+.import-math-preview { min-width: 0; max-width: 100%; overflow-x: auto; overflow-wrap: anywhere; white-space: pre-wrap; background: var(--bg); padding: 8px; border-radius: 6px; margin-top: 6px; }
+.import-math-preview .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+.import-math-preview:empty { display: none; }
+.import-uncertainties, .import-photo-error, .import-result-hint { overflow-wrap: anywhere; }
+.import-uncertainties ul { margin: 4px 0; padding-left: 20px; }
+.import-page :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 850px) {
+  .import-photo-layout { grid-template-columns: minmax(0, 1fr); }
+  .import-photo-reference { position: static; max-height: none; overflow: visible; }
+  .import-original img { max-height: 360px; }
+}
+@media (max-width: 640px) {
+  .import-metadata { grid-template-columns: 1fr; }
+  .import-photo { padding: 12px; }
+}

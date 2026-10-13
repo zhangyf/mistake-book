@@ -72,6 +72,10 @@ views.subject = (function () {
     search.oninput = function () { state.kw = search.value.trim().toLowerCase(); paintList(main); };
     bar.appendChild(search);
 
+    var importButton = app.el('button', 'primary', '导入照片');
+    importButton.onclick = function () { location.hash = '#/import/' + encodeURIComponent(subject); };
+    bar.appendChild(importButton);
+
     var exp = app.el('button', 'primary', '导出');
     exp.onclick = function () { openExport(); };
     bar.appendChild(exp);
@@ -86,6 +90,7 @@ views.subject = (function () {
     listWrap.appendChild(app.el('div', 'empty', '加载中…'));
 
     app.api('/api/entries?subject=' + encodeURIComponent(subject)).then(function (d) {
+      if (!main.contains(listWrap)) return;
       // 面包屑用老师起的名字（没起就还是科目名）
       if (d.display) {
         var crumb = document.getElementById('crumb');

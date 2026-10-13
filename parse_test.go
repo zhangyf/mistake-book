@@ -119,6 +119,54 @@ func TestParseDropsPigaifield(t *testing.T) {
 	}
 }
 
+func TestImportMarkdownLosslessAndExact(t *testing.T) {
+	questions := []importQuestion{
+		{Qno: "第10题", Stem: "十题"},
+		{Qno: "第1题(10)", Stem: "第十小问"},
+		{Qno: "第1题(1)", Stem: "  计算 $-\\frac{16}{25}$（　　）\n## 这不是新题\n**答案**：这是题干原文\n<!-- -->\n", StudentAnswer: "\n原手写\n**题干**：也不是新字段\n", Analysis: "人工分析"},
+		{Qno: "第1题", Stem: "一题"},
+	}
+	md := string(renderImportMarkdown(questions, "hash"))
+	for _, q := range questions {
+		p := ParseMarkdown(md, q.Qno)
+		if !p.Parsed || p.Heading != q.Qno || p.Sections[0].Value != q.Stem || p.Sections[1].Value != q.StudentAnswer {
+			t.Fatalf("无损读取/精确匹配失败 %q: %+v", q.Qno, p)
+		}
+	}
+	for _, qno := range []string{"", "第2题", "第1题(2)"} {
+		if p := ParseMarkdown(md, qno); p.Parsed || !strings.Contains(p.Raw, "未找到题号") {
+			t.Fatalf("缺题不能回退到另一题: %+v", p)
+		}
+	}
+	if p := ParseMarkdown(md, "１"); !p.Parsed || p.Sections[0].Value != "一题" {
+		t.Fatalf("规范化题号失败: %+v", p)
+	}
+}
+
+func TestImportMarkdownInvalidMarkerFailsClosed(t *testing.T) {
+	for _, md := range []string{
+		importMarkdownPrefix + "bad" + importMarkdownSuffix + "\n## 第1题\n**题干**：不能误读",
+		importMarkdownPrefix + `{"version":2,"questions":[]}` + importMarkdownSuffix,
+		string(renderImportMarkdown([]importQuestion{{Qno: "1", Stem: "甲"}, {Qno: "第1题", Stem: "乙"}}, "hash")),
+	} {
+		p := ParseMarkdown(md, "第1题")
+		if p.Parsed || !strings.Contains(p.Raw, "损坏") {
+			t.Fatalf("损坏新格式不能当普通md匹配: %+v", p)
+		}
+	}
+}
+
+func TestImportExplicitEmptySourcePreserved(t *testing.T) {
+	m := testImportMetadata()
+	m.Questions[0].Source = ""
+	if err := normalizeImportMetadata(&m); err != nil {
+		t.Fatal(err)
+	}
+	if m.Questions[0].Source != "" {
+		t.Fatal("显式清空的题目出处不应回填批次默认值")
+	}
+}
+
 func TestParseUnknownLabelKept(t *testing.T) {
 	// 未知标签不能丢内容
 	p := ParseMarkdown("## 第 5 题\n**题干**：x\n**老师评语**：写得不错", "第5题")
