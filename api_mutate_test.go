@@ -76,3 +76,31 @@ func TestUpdateEntryStemRejectsUnknownQuestion(t *testing.T) {
 		t.Fatal("dry-run 也应校验题号")
 	}
 }
+
+func TestUpdateEntryEmptyTagsNoConflict(t *testing.T) {
+	f := newFakeImportStore()
+	// 索引里没有 tags 字段（今天导入的题就是这样）
+	f.seedIndex(Index{Items: []Entry{{ID: "数学-2026-10-13-import-abc-第7题", Subject: "数学", Qno: "第7题",
+		Exam: "有理数", Source: "课外班作业"}}})
+	s := importTestServer(f)
+
+	// 浏览器每次都整包提交，tags 是空数组
+	w := putEntry(t, s, map[string]interface{}{"id": "数学-2026-10-13-import-abc-第7题",
+		"exam": "有理数", "source": "课外班作业", "analysis": "", "tags": []string{}, "note": ""})
+	if w.Code != 200 {
+		t.Fatalf("空知识点保存不应冲突，实际 %d body=%s", w.Code, w.Body.String())
+	}
+	if f.index(t).Items[0].Tags != nil {
+		t.Fatalf("空数组应存成 nil，实际 %#v", f.index(t).Items[0].Tags)
+	}
+	// 带知识点时照常写入
+	w2 := putEntry(t, s, map[string]interface{}{"id": "数学-2026-10-13-import-abc-第7题",
+		"tags": []string{"数轴", "动点问题", "数轴"}})
+	if w2.Code != 200 {
+		t.Fatalf("带知识点保存失败: %d %s", w2.Code, w2.Body.String())
+	}
+	got := f.index(t).Items[0].Tags
+	if len(got) != 2 || got[0] != "数轴" || got[1] != "动点问题" {
+		t.Fatalf("知识点应去重保序: %#v", got)
+	}
+}

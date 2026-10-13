@@ -203,9 +203,16 @@ func (s *server) updateEntry(w http.ResponseWriter, r *http.Request) {
 				if hasAnalysis {
 					idx.Items[i].Analysis = req.Analysis
 				}
-				if req.Tags != nil {
-					idx.Items[i].Tags = compactTags(req.Tags)
+			if req.Tags != nil {
+				// 空数组存成 nil：Entry.Tags 是 omitempty，存 [] 会在 JSON 里消失，
+				// 回读变 nil，和校验用的 []string{} 对不上（曾导致保存一律报冲突）。
+				t := compactTags(req.Tags)
+				if len(t) == 0 {
+					idx.Items[i].Tags = nil
+				} else {
+					idx.Items[i].Tags = t
 				}
+			}
 				if req.Note != "" || hasNote {
 					idx.Items[i].Note = req.Note
 				}
@@ -233,9 +240,9 @@ func (s *server) updateEntry(w http.ResponseWriter, r *http.Request) {
 				if hasAnalysis && it.Analysis != req.Analysis {
 					return false
 				}
-				if req.Tags != nil && !reflect.DeepEqual(it.Tags, compactTags(req.Tags)) {
-					return false
-				}
+			if req.Tags != nil && !sameTags(it.Tags, req.Tags) {
+				return false
+			}
 				return true
 			}
 			return false
@@ -324,3 +331,8 @@ func compactTags(in []string) []string {
 }
 
 func trimSpace(s string) string { return strings.TrimSpace(s) }
+
+// sameTags 比较知识点：nil 与空数组视为相同（omitempty 存空会变成 nil）。
+func sameTags(a, b []string) bool {
+	return reflect.DeepEqual(compactTags(a), compactTags(b))
+}
