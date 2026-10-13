@@ -134,12 +134,15 @@ var app = (function () {
   // renderText —— 把一段纯文本渲染成段落/列表/字符画代码块，再跑 KaTeX。
   // 只用 textContent 塞内容，绝不 innerHTML（题干来自 md 原文，防注入）。
   // 三个反引号独占一行的围栏块按字符画处理：<pre> 等宽保留空格。
-  function renderText(container, text) {
+  // 声明为 figure 且能解析的块（老师在原图上框选的题图）渲染成按框裁好的图；
+  // 解析不出、或 ctx.figureUrl 解不出地址，就退回字符画显示，绝不吞内容。
+  function renderText(container, text, ctx) {
     container.textContent = '';
     var lines = (text || '').split('\n');
     var ul = null;
     var pre = null;
-    lines.forEach(function (line) {
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
       if (pre !== null) {
         if (/^\s*```/.test(line)) {
           container.appendChild(pre);
@@ -147,14 +150,31 @@ var app = (function () {
         } else {
           pre.appendChild(document.createTextNode(line + '\n'));
         }
-        return;
+        continue;
       }
       var t = line.trim();
       if (/^```/.test(t)) {
+        if (window.crop && crop.isFigureFence(t)) {
+          var end = -1;
+          for (var j = i + 1; j < lines.length; j++) {
+            if (/^\s*```/.test(lines[j])) { end = j; break; }
+          }
+          var ref = crop.refOf(lines.slice(i + 1, end >= 0 ? end : lines.length));
+          if (ref) {
+            var figure = ctx && typeof ctx.figureUrl === 'function'
+              ? crop.renderFigure(ref, ctx.figureUrl) : null;
+            if (figure) {
+              ul = null;
+              container.appendChild(figure);
+              i = end >= 0 ? end : lines.length - 1;
+              continue;
+            }
+          }
+        }
         ul = null;
         pre = document.createElement('pre');
         pre.className = 'fig';
-        return;
+        continue;
       }
       if (/^[-*]\s+/.test(t)) {
         if (!ul) { ul = el('ul'); container.appendChild(ul); }
@@ -163,7 +183,7 @@ var app = (function () {
         ul = null;
         if (t) container.appendChild(el('p', null, line));
       }
-    });
+    }
     if (pre) container.appendChild(pre); // 未闭合围栏也照常显示，别吞内容
     math(container);
   }
@@ -240,15 +260,27 @@ var app = (function () {
     route();
   }
 
+  // withToken —— <img> 没法带自定义头，只能把 token 拼进 URL（后端也接受 ?token=）
+  function withToken(url) {
+    var t = token();
+    if (!t) return url;
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(t);
+  }
+
+  // figureResolver —— 题图块的 key → 可用的图片地址。
+  // @photo 指本 md 对应的原图（详情页从 image_url 拿）；exam-bank/ 开头的是
+  // 错题本里的对象，走后端代理 /api/image（凭证不出后端）。
+  function figureResolver(photoUrl) {
+    return function (key) {
+      if (key === '@photo') return photoUrl || '';
+      if (/^exam-bank\//i.test(key)) return withToken('/api/image?key=' + encodeURIComponent(key));
+      return '';
+    };
+  }
+
   return {
     boot: boot, api: api, apiForm: apiForm, apiRaw: apiRaw, el: el, renderText: renderText, math: math,
     toast: toast, setToken: setToken, token: token,
-    download: download,
-    // <img> 没法带自定义头，只能把 token 拼进 URL（后端也接受 ?token=）
-    withToken: function (url) {
-      var t = token();
-      if (!t) return url;
-      return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(t);
-    }
+    download: download, withToken: withToken, figureResolver: figureResolver
   };
 })();

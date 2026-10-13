@@ -2,7 +2,10 @@ module github.com/zhangyf/mistake-book
 
 go 1.25.0
 
-require github.com/zhangyf/objstore v0.17.0
+require (
+	github.com/tencentyun/cos-go-sdk-v5 v0.7.73
+	github.com/zhangyf/objstore v0.17.0
+)
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.6 // indirect
@@ -27,5 +30,4 @@ require (
 	github.com/google/go-querystring v1.0.0 // indirect
 	github.com/mitchellh/mapstructure v1.4.3 // indirect
 	github.com/mozillazg/go-httpheader v0.2.1 // indirect
-	github.com/tencentyun/cos-go-sdk-v5 v0.7.73 // indirect
 )

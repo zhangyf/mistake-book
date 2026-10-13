@@ -236,3 +236,24 @@ input[type=text].search { min-width: 180px; }
   .import-metadata { grid-template-columns: 1fr; }
   .import-photo { padding: 12px; }
 }
+
+/* ==========================================================================
+   题图（框选原图）—— 老师在原图上框出的图，见 crop.js
+   ========================================================================== */
+.croppanel { margin: 10px 0; min-width: 0; }
+.cropbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.cropbar .hint { margin: 0; }
+.cropstage { position: relative; display: block; max-width: 100%; line-height: 0; }
+.cropstage img { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
+.cropstage.on { cursor: crosshair; touch-action: none; }
+.cropstage.on img { border-color: var(--accent); }
+.croprubber { position: absolute; display: none; pointer-events: none; border: 2px solid #ba7517; background: rgba(250, 238, 218, .35); }
+
+.figcrop { position: relative; overflow: hidden; display: block; width: min(72%, 420px); max-width: 100%;
+  margin: 8px 0; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.figcrop img { position: absolute; height: auto; max-width: none; }
+.figcrop-bad { display: flex; align-items: center; justify-content: center; min-height: 48px; color: var(--muted); font-size: 13px; }
+.figrow { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 8px 0; }
+.figrow .figcrop { width: 180px; margin: 0; }
+.figrow .figmeta { color: var(--muted); font-size: 12px; }
+.figlist:empty { display: none; }

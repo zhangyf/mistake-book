@@ -230,6 +230,9 @@ views.subject = (function () {
 
     app.api('/api/entry?id=' + encodeURIComponent(it.id)).then(function (d) {
       box.textContent = '';
+      // 题图（figure 块）里 @photo 指向本条的原图；exam-bank/ 开头的走 /api/image 代理
+      var photoUrl = d.image_url ? app.withToken(d.image_url) : '';
+      var ctx = { figureUrl: app.figureResolver(photoUrl) };
       var head = app.el('div', 'head');
       head.appendChild(app.el('span', 'qno', (d.qno || '') + '　' + (d.qtype || '') + '　' + (d.exam || '') + '　' + (d.date || '')));
       if (d.source) {
@@ -284,7 +287,7 @@ views.subject = (function () {
         var box2 = app.el('div', 'v');
         f.appendChild(box2);
         right.appendChild(f);
-        app.renderText(box2, v);
+        app.renderText(box2, v, ctx);
       }
 
       if (parsedOK) {
@@ -302,7 +305,7 @@ views.subject = (function () {
       }
       grid.appendChild(right);
 
-      box.appendChild(actions(d, detailWrap));
+      box.appendChild(actions(d, detailWrap, ctx));
       app.math(box);
     }).catch(function (e) {
       box.textContent = '';
@@ -312,7 +315,7 @@ views.subject = (function () {
 
   // actions —— 查看态只给「编辑 / 删除」两个按钮；点了编辑才换成表单。
   // 之前是详情一展开就铺满输入框，看着像误入编辑模式，老师明确说不对。
-  function actions(d, detailWrap) {
+  function actions(d, detailWrap, ctx) {
     var wrap = app.el('div', 'actions');
     var edit = app.el('button', 'primary', '编辑');
     var del = app.el('button', 'danger', '删除');
@@ -320,7 +323,7 @@ views.subject = (function () {
     wrap.appendChild(del);
 
     edit.onclick = function () {
-      wrap.replaceWith(editor(d, detailWrap));
+      wrap.replaceWith(editor(d, detailWrap, ctx));
     };
 
     del.onclick = function () {
@@ -376,7 +379,7 @@ views.subject = (function () {
   }
 
   // mdEditor —— 题干/作答编辑器：文本框 + 一个「公式预览」按钮（公式与字符画都能看）
-  function mdEditor(label, value, placeholder) {
+  function mdEditor(label, value, placeholder, ctx) {
     var wrap = app.el('div', 'mdeditor');
     var ta = document.createElement('textarea');
     ta.className = 'stem-input';
@@ -385,22 +388,63 @@ views.subject = (function () {
     wrap.appendChild(ta);
     var preview = app.el('div', 'import-math-preview');
     var btn = app.el('button', 'ghost import-preview', '公式预览');
-    btn.onclick = function () { app.renderText(preview, ta.value); };
+    btn.onclick = function () { app.renderText(preview, ta.value, ctx); };
     wrap.appendChild(btn);
     wrap.appendChild(preview);
     return { node: wrap, input: ta };
   }
 
-  function editor(d, detailWrap) {
+  function editor(d, detailWrap, ctx) {
     var form = app.el('div', 'editform');
 
     // 题干与我的作答存在 md 里，改它们会重写题目原文
     var stemBox = mdEditor('题干', mdSection(d, ['题干', '题目']),
-      '公式用 $…$；图形用三个反引号围栏的字符画');
+      '公式用 $…$；图形用三个反引号围栏的字符画', ctx);
     form.appendChild(frow('题干', stemBox.node, true));
 
+    // ---- 题图：模型画的字符画不满意时，直接在原图上框一块 ----
+    var figBox = app.el('div', 'figbox');
+    var figList = app.el('div', 'figlist');
+    var figCropHost = app.el('div', 'figcropper');
+    figBox.appendChild(figList);
+    figBox.appendChild(figCropHost);
+    form.appendChild(frow('题图', figBox, true));
+
+    function paintFigures() {
+      figList.textContent = '';
+      var figs = crop.figures(stemBox.input.value);
+      figs.forEach(function (fig, index) {
+        figList.appendChild(crop.renderThumb(fig.ref, ctx.figureUrl, function () {
+          stemBox.input.value = crop.removeAt(stemBox.input.value, index);
+          paintFigures();
+          app.toast('已移除题图（点「保存」后写入）');
+        }));
+      });
+      if (figs.length) {
+        figList.appendChild(app.el('div', 'hint', '共 ' + figs.length + ' 张题图，随题干一起保存。'));
+      }
+    }
+
+    if (d.image_url) {
+      figCropHost.appendChild(app.el('div', 'hint',
+        '模型画的图不满意时，用下面这张原图框一块当题图：点「框选原图」→ 在图上拖一个矩形 → 松手即插入题干。'));
+      crop.attach(figCropHost, {
+        imageUrl: app.withToken(d.image_url),
+        key: function () { return d.image_key || crop.PHOTO_ALIAS; },
+        hint: '在图上拖一个矩形，松手即插入题干',
+        onPick: function (ref) {
+          stemBox.input.value = crop.upsert(stemBox.input.value, crop.block(ref));
+          paintFigures();
+          app.toast('已插入题图（点「保存」后写入）');
+        }
+      });
+    } else {
+      figCropHost.appendChild(app.el('div', 'hint', '（这条没有原图，无法框选）'));
+    }
+    paintFigures();
+
     var ansBox = mdEditor('我的作答', mdSection(d, ['我的作答', '作答', '我的答案']),
-      '手写作答，多行照抄');
+      '手写作答，多行照抄', ctx);
     form.appendChild(frow('我的作答', ansBox.node, true));
 
     var stem0 = stemBox.input.value;

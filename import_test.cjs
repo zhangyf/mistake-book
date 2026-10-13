@@ -38,6 +38,16 @@ class Element {
     this.parentNode = null;
   }
   contains(node) { return this === node || this.children.some(c => c.contains(node)); }
+  replaceWith(node) {
+    if (this.parentNode) {
+      const i = this.parentNode.children.indexOf(this);
+      if (i >= 0) { this.parentNode.children[i] = node; node.parentNode = this.parentNode; }
+    }
+    this.parentNode = null;
+  }
+  addEventListener(name, fn) { this.events = this.events || {}; (this.events[name] = this.events[name] || []).push(fn); }
+  setPointerCapture() {}
+  getBoundingClientRect() { return { left: 0, top: 0, width: 400, height: 300 }; }
 }
 class TestFormData {
   constructor() { this.values = new Map(); }
@@ -48,6 +58,15 @@ const all = (root, predicate) => [root, ...root.children.flatMap(c => all(c, () 
 const byClass = (root, name) => all(root, e => e.className.split(' ').includes(name));
 const byName = (root, name) => all(root, e => e.name === name)[0];
 const click = element => element.onclick({ stopPropagation() {} });
+// 模拟一次拖拽框选：crop.js 的 pointerdown/move/up 都挂在 .cropstage 上
+const drag = (stage, from, to) => {
+  const fire = (name, x, y) => (stage.events?.[name] || []).forEach(fn =>
+    fn({ clientX: x, clientY: y, button: 0, pointerId: 1, preventDefault() {} }));
+  fire('pointerdown', from.x, from.y);
+  fire('pointermove', to.x, to.y);
+  fire('pointerup', to.x, to.y);
+};
+const buttonWith = (root, text) => all(root, e => e.tagName === 'button' && e.textContent === text)[0];
 const input = (element, value) => { element.value = value; (element.oninput || element.onchange)(); };
 const check = photo => { const el = byClass(photo, 'import-reviewed')[0]; el.checked = true; el.onchange(); };
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -57,7 +76,7 @@ const recognition = (questions = [question()]) => ({ success: true, questions, m
 const httpError = (status, message = '字段校验失败') => ({ ok: false, status, json: async () => ({ success: false, error: message }) });
 const deferred = () => { let resolve, reject; const promise = new Promise((r, j) => { resolve = r; reject = j; }); return { promise, resolve, reject }; };
 
-function fixture({ config = {}, hash = '#/import/数学', dateClass = Date } = {}) {
+function fixture({ config = {}, hash = '#/import/数学', dateClass = Date, entries = null, entry = null } = {}) {
   const nodes = Object.fromEntries(['app', 'crumb', 'toast', 'token-state', 'btn-token'].map(id => [id, new Element('div')]));
   const listeners = new Map();
   const calls = [], prompts = [], replies = [], createdURLs = [], revokedURLs = [], mathCalls = [];
@@ -70,7 +89,10 @@ function fixture({ config = {}, hash = '#/import/数学', dateClass = Date } = {
       const data = JSON.parse(call.options.body.get('metadata'));
       return { success: true, ids: data.questions.map((_, i) => 'entry-' + i), imported: data.questions.length, already_imported: false, dry_run: false };
     },
-    raw: null
+    raw: null,
+    // 科目页用例：进入页面就会立刻发请求，所以列表/详情必须在 boot 之前就备好
+    entries,
+    entry
   };
   function emit(name, event = {}) { for (const handler of [...(listeners.get(name) || [])]) handler(event); }
   const window = {
@@ -95,14 +117,18 @@ function fixture({ config = {}, hash = '#/import/数学', dateClass = Date } = {
       let data;
       if (url === '/api/import/config') data = control.config;
       else if (url === '/api/subjects') data = { subjects: [{ subject: '数学', name: '七年级上册数学', count: 0, last_date: '' }] };
-      else if (url.startsWith('/api/entries?')) data = { items: [], facets: {} };
+      else if (url.startsWith('/api/entries?')) data = control.entries || { items: [], facets: {} };
+      else if (url.startsWith('/api/entry?id=')) data = control.entry;
+      else if (url === '/api/entry') data = { success: true, id: JSON.parse(options.body).id, dry_run: false };
       else if (url === '/api/import/recognize') data = await control.recognize(call);
       else if (url === '/api/import/confirm') data = await control.confirm(call);
       else throw new Error('未模拟的请求：' + url);
       return { ok: true, status: 200, json: async () => data };
     }
   });
-  for (const script of ['app.js', 'home.js', 'subject.js', 'import.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, 'web', script), 'utf8'), context, { filename: script });
+  for (const script of ['app.js', 'crop.js', 'home.js', 'subject.js', 'import.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, 'web', script), 'utf8'), context, { filename: script });
+  // 浏览器里 window 就是全局对象，脚本的顶层 var 都挂在 window 上；这里补上同样的可见性
+  window.crop = context.crop;
   context.app.boot();
   const main = nodes.app;
   const photos = () => byClass(main, 'import-photo');
@@ -771,8 +797,12 @@ test('原图与题号同在左栏，编辑核对区在右栏，响应式 CSS 限
   const reference = byClass(p, 'import-photo-reference')[0];
   const editor = byClass(p, 'import-photo-editor')[0];
   assert.deepEqual(layout.children, [reference, editor]);
-  assert.equal(reference.children[0], byClass(p, 'import-original')[0]);
-  assert.equal(reference.children[1], byName(p, 'question_numbers').parentNode);
+  assert.equal(reference.children[0], byClass(p, 'import-cropper')[0]);
+  assert.equal(reference.children[1], byClass(p, 'import-original')[0]);
+  assert.equal(reference.children[2], byName(p, 'question_numbers').parentNode);
+  const stage = byClass(p, 'cropstage')[0];
+  assert.ok(stage && stage.children[0] && stage.children[0].tagName === 'img', '原图仍在左栏，同时充当框选画布');
+  assert.ok(String(stage.children[0].src).startsWith('blob:'), '只显示自建 blob 地址');
   assert.equal(editor.contains(byClass(p, 'import-questions')[0]), true);
   assert.equal(editor.contains(byClass(p, 'import-reviewed')[0]), true);
   const css = fs.readFileSync(path.join(__dirname, 'web/style.css'), 'utf8');
@@ -812,4 +842,188 @@ test('题干中的字符画围栏渲染为等宽 pre，不显示反引号', asyn
   f.context.app.renderText(box2, '前文\n```\n  ─●─▶');
   assert.equal(byClass(box2, 'fig').length, 1);
   assert.match(byClass(box2, 'fig')[0].textContent, /─●─▶/);
+});
+
+// ---------------------------------------------------------------------------
+// 题图（框选原图）：2026-10-13 老师要求 —— 题目里的图模型画不好时，
+// 允许在老照片上框一块当题图；导入草稿和编辑已有题目两条路都要能用。
+// ---------------------------------------------------------------------------
+
+const FIGURE_KEY = 'exam-bank/数学/2026-10-有理数/images/2026-10-13-import-9f44.jpg';
+
+function detailFixture(over = {}) {
+  const f = fixture({
+    hash: '#/subject/数学',
+    entries: {
+      items: [{ id: 'e1', subject: '数学', exam: '有理数', date: '2026-10-13', qno: '第4题', qtype: '选择题',
+        result: 'unknown', source: '', tags: [], note: '', preview: '如图，数轴上的点表示（　　）',
+        image_key: FIGURE_KEY, md_key: 'exam-bank/数学/2026-10-有理数/2026-10-13-a.md' }],
+      facets: { tags: {}, qtype: {}, result: {}, exam: {}, source: {} }
+    },
+    entry: Object.assign({
+      success: true, id: 'e1', subject: '数学', exam: '有理数', date: '2026-10-13', qno: '第4题',
+      qtype: '选择题', source: '', analysis: '', tags: [], note: '',
+      image_key: FIGURE_KEY, image_url: '/api/image?key=' + encodeURIComponent(FIGURE_KEY),
+      parsed_md: {
+        parsed: true, heading: '第4题　选择题', raw: '', sections: [
+          { key: '题干', value: '数轴上的点表示（　　）\n\n```\n  M   O\n ─●───●─▶\n -1   0\n```' },
+          { key: '我的作答', value: 'A' }
+        ]
+      }
+    }, over)
+  });
+  return f;
+}
+
+async function openEditor(f) {
+  await flush();
+  if (!byClass(f.main, 'qcard').length) console.error('DBG', JSON.stringify(f.main.textContent), f.calls.map(c => c.url));
+  click(byClass(f.main, 'qcard')[0]);
+  await flush();
+  click(buttonWith(f.main, '编辑'));
+  await flush();
+}
+
+test('编辑已有题目时能在原图上框选题图，并随题干保存', async () => {
+  const f = detailFixture();
+  await openEditor(f);
+
+  assert.equal(byClass(f.main, 'figcropper').length, 1, '编辑表单里要有框选面板');
+  const stage = byClass(f.main, 'cropstage')[0];
+  assert.ok(stage, '原图要作为框选画布出现');
+  assert.match(String(stage.children[0].src), /^\/api\/image\?key=/, '原图仍走后端代理');
+  assert.match(String(stage.children[0].src), /token=test-token/, 'img 带不上头，token 拼在 URL 上');
+
+  // 没进框选模式时拖拽不生效
+  drag(stage, { x: 20, y: 20 }, { x: 220, y: 170 });
+  assert.equal(byClass(f.main, 'stem-input')[0].value.includes('```figure'), false);
+
+  click(buttonWith(f.main, '框选原图'));
+  drag(stage, { x: 40, y: 30 }, { x: 240, y: 180 });
+
+  const stem = byClass(f.main, 'stem-input')[0].value;
+  assert.match(stem, /```figure\n/, '应插入 figure 块');
+  assert.match(stem, new RegExp(FIGURE_KEY), '编辑已有题目时写真实 key，不再用 @photo');
+  assert.match(stem, /0\.1000 0\.1000 0\.5000 0\.5000/, '坐标应是归一化的框（拖动范围 40,30→240,180）');
+  assert.equal(stem.includes('─●───●─▶'), false, '模型画的字符画应被题图替换');
+  assert.equal(byClass(f.main, 'figrow').length, 1, '应出现题图缩略图');
+
+  click(buttonWith(f.main, '保存'));
+  await flush(); await flush();
+  const put = f.calls.find(c => c.url === '/api/entry' && c.options.method === 'PUT');
+  assert.ok(put, '保存应提交 PUT /api/entry');
+  const body = JSON.parse(put.options.body);
+  assert.match(body.stem, new RegExp('```figure\\n' + FIGURE_KEY), '题干里的题图要一起提交');
+  assert.equal(f.calls.filter(c => c.url === '/api/entries?subject=' + encodeURIComponent('数学')).length, 2, '保存后重拉列表回查看态');
+});
+
+test('编辑态可以删掉已有的题图，删完不再提交 figure 块', async () => {
+  const f = detailFixture({
+    parsed_md: {
+      parsed: true, heading: '第4题', raw: '', sections: [
+        { key: '题干', value: '数轴上的点（　　）\n\n```figure\n' + FIGURE_KEY + ' 0.1000 0.2000 0.5000 0.2500 1.6000\n```' },
+        { key: '我的作答', value: 'A' }
+      ]
+    }
+  });
+  await openEditor(f);
+
+  assert.equal(byClass(f.main, 'figrow').length, 1, '已有题图应列出来');
+  click(buttonWith(f.main, '删除此图'));
+  assert.equal(byClass(f.main, 'figrow').length, 0);
+  assert.equal(byClass(f.main, 'stem-input')[0].value.includes('```figure'), false);
+
+  click(buttonWith(f.main, '保存'));
+  await flush();
+  const body = JSON.parse(f.calls.find(c => c.url === '/api/entry' && c.options.method === 'PUT').options.body);
+  assert.equal(String(body.stem || '').includes('figure'), false, '删掉的题图不该再提交');
+});
+
+test('详情页把题图渲染成按框裁好的图，@photo 指向本条原图', async () => {
+  const f = detailFixture({
+    parsed_md: {
+      parsed: true, heading: '第4题', raw: '', sections: [
+        { key: '题干', value: '看图作答：\n\n```figure\n@photo 0.2000 0.3000 0.4000 0.2000 2.6667\n```' },
+        { key: '我的作答', value: 'A' }
+      ]
+    }
+  });
+  await flush();
+  click(byClass(f.main, 'qcard')[0]);
+  await flush();
+
+  const fig = byClass(f.main, 'figcrop')[0];
+  assert.ok(fig, '详情里的 figure 块应渲染成题图而不是 pre');
+  const img = fig.children[0];
+  assert.match(String(img.src), /^\/api\/image\?key=/, '@photo 解析成本条原图');
+  assert.equal(img.style.width, '250%');   // 100 / 0.4
+  assert.equal(img.style.left, '-50%');    // -100 * 0.2 / 0.4
+  assert.equal(img.style.top, '-150%');    // -100 * 0.3 / 0.2
+  assert.equal(byClass(f.main, 'figcrop').length, 1);
+});
+
+test('导入草稿里框选题图，写 @photo 占位随题干进确认请求', async () => {
+  const f = await readyFixture();
+  const p = f.photos()[0];
+  const stage = byClass(p, 'cropstage')[0];
+  click(buttonWith(byClass(p, 'cropbar')[0], '框选原图'));
+  drag(stage, { x: 20, y: 20 }, { x: 220, y: 170 });
+
+  const stem = byName(p, 'stem').value;
+  assert.match(stem, /```figure\n@photo /, '草稿阶段还不知道原图最终 key，写 @photo 占位');
+  assert.equal(byClass(p, 'figrow').length, 1);
+  assert.match(byClass(p, 'figrow')[0].children[0].children[0].src, /^blob:/, '草稿用本地原图渲染题图');
+
+  check(p);
+  f.confirmPhoto(p);
+  await flush();
+  const sent = JSON.parse(f.requests('confirm')[0].options.body.get('metadata'));
+  assert.match(sent.questions[0].stem, /```figure\n@photo /, '确认请求里仍是 @photo，由服务端换成真实 key');
+  assert.equal(byClass(p, 'import-photo').length, 1);
+});
+
+test('导入草稿里删掉误框的题图后不再提交', async () => {
+  const f = await readyFixture();
+  const p = f.photos()[0];
+  click(buttonWith(byClass(p, 'cropbar')[0], '框选原图'));
+  drag(byClass(p, 'cropstage')[0], { x: 20, y: 20 }, { x: 220, y: 170 });
+  assert.equal(byName(p, 'stem').value.includes('```figure'), true);
+
+  click(buttonWith(byClass(p, 'figrow')[0], '删除此图'));
+  assert.equal(byName(p, 'stem').value.includes('```figure'), false);
+  assert.equal(byClass(p, 'figrow').length, 0);
+
+  check(p);
+  f.confirmPhoto(p);
+  await flush();
+  const sent = JSON.parse(f.requests('confirm')[0].options.body.get('metadata'));
+  assert.equal(sent.questions[0].stem.includes('figure'), false);
+});
+
+test('多题共用一张照片时，框选后要明确插给哪道题', async () => {
+  const f = await readyFixture();
+  const p = f.photos()[0];
+  click(byClass(p, 'import-recognize')[0]);   // 重新识别，换成两道题
+  await flush();
+  const twoQuestions = { success: true, model: 'mock-model', questions: [question(), question({ qno: '第5题' })] };
+  f.control.recognize = () => twoQuestions;
+  input(byName(p, 'question_numbers'), '第4题、第5题');
+  click(byClass(p, 'import-recognize')[0]);
+  await flush();
+  assert.equal(all(p, e => e.className.split(' ').includes('import-question')).length, 2);
+
+  click(buttonWith(byClass(p, 'cropbar')[0], '框选原图'));
+  drag(byClass(p, 'cropstage')[0], { x: 20, y: 20 }, { x: 220, y: 170 });
+
+  // 归属弹窗只存在于 document.body 上，选第二项再插入
+  const mask = byClass(f.context.document.body, 'mask')[0];
+  assert.ok(mask, '多题时应弹出归属选择');
+  const modal = byClass(mask, 'modal')[0];
+  const select = all(modal, e => e.tagName === 'select')[0];
+  select.value = '1';
+  click(buttonWith(modal, '插入此图'));
+
+  const stems = all(p, e => e.name === 'stem').map(e => e.value);
+  assert.equal(stems[0].includes('figure'), false, '没选中的题不该被插');
+  assert.match(stems[1], /```figure\n@photo /, '应插到选中的那道题');
 });

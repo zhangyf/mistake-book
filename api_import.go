@@ -472,6 +472,22 @@ func escapeImportMarkdown(text string) string {
 	return strings.Join(lines, "\n")
 }
 
+// resolvePhotoRefs 把草稿里 figure 块的 @photo 占位换成真实原图 key。
+//
+// 网页草稿阶段还不知道原图最终存到哪个 key（key 由 科目/章节/日期/导入编号 拼出来），
+// 所以框选题图时统一写 @photo。这里在算 payload hash 和渲染 md 之前换掉，
+// 保证：重试幂等（同样的输入算出同样的 hash）、落盘的 md 里永远是真实 key。
+func resolvePhotoRefs(m *importMetadata, photo importPhoto) {
+	name := "import-" + m.ImportID
+	_, imageKey := buildKeys(m.Subject, m.Chapter, m.Date, name, photo.ext)
+	if imageKey == "" {
+		return
+	}
+	for i := range m.Questions {
+		m.Questions[i].Stem = resolvePhotoAlias(m.Questions[i].Stem, imageKey)
+	}
+}
+
 func importEntries(m importMetadata, photo importPhoto) ([]Entry, []string, string, string) {
 	name := "import-" + m.ImportID
 	mdKey, imageKey := buildKeys(m.Subject, m.Chapter, m.Date, name, photo.ext)
@@ -530,6 +546,7 @@ func checkImportIndex(idx *Index, m importMetadata, receipt ImportReceipt, entri
 }
 
 func (s *server) confirmImport(ctx context.Context, photo importPhoto, m importMetadata) (importResult, error) {
+	resolvePhotoRefs(&m, photo)
 	entries, ids, mdKey, imageKey := importEntries(m, photo)
 	hash := importPayloadHash(photo.data, m)
 	receipt := ImportReceipt{PayloadHash: hash, IDs: ids}

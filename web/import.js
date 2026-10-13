@@ -282,15 +282,13 @@ views.import = (function () {
       layout.appendChild(reference);
       layout.appendChild(editor);
       card.appendChild(layout);
-      var original = app.el('a', 'import-original');
+      // 原图只渲染一次：既是核对用的参考图，也是框选题图的画布（crop.js）
+      p.cropHost = app.el('div', 'import-cropper');
+      reference.appendChild(p.cropHost);
+      var original = app.el('a', 'import-original', '放大查看原图（新窗口）');
       original.href = p.url;
       original.target = '_blank';
       original.rel = 'noopener noreferrer';
-      var image = app.el('img');
-      image.src = p.url;
-      image.alt = '原图：' + p.file.name;
-      original.appendChild(image);
-      original.appendChild(app.el('span', null, '查看原图 / 放大（新窗口）'));
       reference.appendChild(original);
       p.numbersInput = app.el('input');
       p.numbersInput.type = 'text';
@@ -338,11 +336,44 @@ views.import = (function () {
       editor.appendChild(field('我已对照原图核对本图所有保留题目，确认题号、题干与作答正确', p.check));
       p.confirm = button('确认入库（仅此图）', 'primary import-confirm', function () { confirmPhoto(p); });
       editor.appendChild(p.confirm);
+
+      // 框选题图：草稿里还不知道原图最终 key，所以写 @photo 占位，
+      // 后端确认入库时换成真实 key（见 api_import.go resolvePhotoRefs）。
+      crop.attach(p.cropHost, {
+        imageUrl: p.url,
+        key: function () { return crop.PHOTO_ALIAS; },
+        hint: '题目的图模型画不好时，在这里框一块当题图；框完可让 AI 核对时一起检查',
+        onPick: function (ref) { insertFigure(p, ref); }
+      });
+    }
+
+    // insertFigure —— 把框好的题图插进某道题的题干（多题时先问插给哪道）
+    function insertFigure(p, ref) {
+      if (locked(p)) { app.toast('这张照片已锁定，不能再改题干'); return; }
+      if (!p.questions.length) { app.toast('还没有识别结果：请先识别此图，再框选题图'); return; }
+      if (p.questions.length === 1) { applyFigure(p, p.questions[0], ref); return; }
+      crop.choose('把这个框插给哪道题？', p.questions.map(function (q, i) {
+        return { value: String(i), label: (q.qno || '第 ' + (i + 1) + ' 项') + (q.qtype ? '　' + q.qtype : '') };
+      }), function (value) {
+        var i = parseInt(value, 10);
+        if (!isNaN(i) && p.questions[i]) applyFigure(p, p.questions[i], ref);
+      });
+    }
+
+    function applyFigure(p, q, ref) {
+      q.stem = crop.upsert(q.stem, crop.block(ref));
+      p.reviewed = false;
+      p.edited = true;
+      paintQuestions(p);
+      refresh();
+      app.toast('已插入题图，核对无误后确认入库');
     }
 
     function paintQuestions(p) {
       p.questionWrap.textContent = '';
       p.controls = [];
+      // 草稿阶段原图还在浏览器里（本地 blob），@photo 直接指向它
+      var ctx = { figureUrl: function (key) { return key === crop.PHOTO_ALIAS ? p.url : ''; } };
       p.questions.forEach(function (q, index) {
         var box = app.el('fieldset', 'import-question');
         box.appendChild(app.el('legend', null, '识别题目 ' + (index + 1)));
@@ -376,9 +407,28 @@ views.import = (function () {
           var preview;
           if (key === 'stem' || key === 'student_answer') {
             preview = app.el('div', 'import-math-preview');
-            var previewButton = button(f[1] + '公式预览', 'ghost import-preview', function () { app.renderText(preview, q[key]); });
+            var previewButton = button(f[1] + '公式预览', 'ghost import-preview', function () { app.renderText(preview, q[key], ctx); });
             box.appendChild(previewButton);
             box.appendChild(preview);
+          }
+          if (key === 'stem') {
+            var figs = crop.figures(q.stem);
+            if (figs.length) {
+              var list = app.el('div', 'figlist');
+              figs.forEach(function (fig, figIndex) {
+                list.appendChild(crop.renderThumb(fig.ref, ctx.figureUrl, function () {
+                  if (locked(p)) return;
+                  q.stem = crop.removeAt(q.stem, figIndex);
+                  input.value = q.stem;
+                  p.reviewed = false;
+                  p.edited = true;
+                  paintQuestions(p);
+                  refresh();
+                }));
+              });
+              box.appendChild(list);
+              box.appendChild(app.el('div', 'hint', '共 ' + figs.length + ' 张题图（从原图框选）。删掉后请重新核对本题，再勾选入库。'));
+            }
           }
         });
         var remove = button('移除此题（多识别时使用）', 'danger import-remove-question', function () {

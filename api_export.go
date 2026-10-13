@@ -73,6 +73,37 @@ type exportItem struct {
 	Note     string
 	Other    []Section
 	ImageSrc string // md: 预签名 URL；html/pdf: data URI
+	PhotoKey string // 本题原图 key，figure 块里的 @photo 指向它
+
+	// Figures: figureAssetKey(key, 框) → 可直接用的 src。
+	// html 是裁好并 base64 内联的小图 data URI，md 是 7 天预签名链接。
+	Figures map[string]string
+}
+
+// figureSrcHTML / figureSrcMD 把题干里的 figure 块换成可直接渲染的片段。
+// 解析不出、找不到图就返回 false，调用方按普通字符画块降级。
+func (it exportItem) figureSrcHTML(ref FigureRef) (string, bool) {
+	key, ok := resolveFigureKey(ref.Key, it.PhotoKey)
+	if !ok {
+		return "", false
+	}
+	src, ok := it.Figures[figureAssetKey(key, ref)]
+	if !ok || src == "" {
+		return "", false
+	}
+	return `<div class="figcrop"><img alt="题图" src="` + src + `"></div>`, true
+}
+
+func (it exportItem) figureSrcMD(ref FigureRef) (string, bool) {
+	key, ok := resolveFigureKey(ref.Key, it.PhotoKey)
+	if !ok {
+		return "", false
+	}
+	url, ok := it.Figures[figureAssetKey(key, ref)]
+	if !ok || url == "" {
+		return "", false
+	}
+	return figureMarkdownLink(url, ref), true
 }
 
 // md 字段别名：不同批次录入的字段名可能不一样，认一组别名比认一个名字稳。
@@ -269,6 +300,13 @@ func (s *server) buildExportItem(e Entry, format string, withImage bool) exportI
 		it.Analysis = mdAnalysis
 	}
 	it.Other = secs
+	it.PhotoKey = e.ImageKey
+
+	texts := []string{it.Stem, it.Answer, it.Analysis, it.Solution, it.Note}
+	for _, s := range it.Other {
+		texts = append(texts, s.Value)
+	}
+	it.Figures = s.figureAssets(e.ImageKey, format, texts)
 
 	if withImage && e.ImageKey != "" {
 		if format == "md" {
@@ -287,6 +325,77 @@ func (s *server) buildExportItem(e Entry, format string, withImage bool) exportI
 		}
 	}
 	return it
+}
+
+// figureAssets 把题目文本里出现的 figure 块准备成可直接使用的 src。
+//
+//   - html：按框真裁 + base64 内联（只内联裁出来的小图，不内联整张原图）
+//   - md：7 天预签名链接（坐标以 #fig= 片段形式附在链接后）
+//
+// 同一张原图上多个框会各自裁一份，所以去重键是「key + 框」。任何一步失败都只是
+// 让这一处 figure 降级成字符画显示，不影响整份导出。
+func (s *server) figureAssets(photoKey, format string, texts []string) map[string]string {
+	out := map[string]string{}
+	if photoKey == "" && !anyFigureText(texts) {
+		return out
+	}
+	raw := map[string][]byte{}
+	for _, text := range texts {
+		for _, blk := range figureBlocks(text) {
+			ref, ok := parseFigureBody(blk.Body)
+			if !ok {
+				continue
+			}
+			key, ok := resolveFigureKey(ref.Key, photoKey)
+			if !ok {
+				continue
+			}
+			assetKey := figureAssetKey(key, ref)
+			if _, done := out[assetKey]; done {
+				continue
+			}
+			switch format {
+			case "md":
+				if u, err := s.st.Presign(bgctx(), key, 7*24*time.Hour); err == nil {
+					out[assetKey] = u
+				}
+			default:
+				data, ok := raw[key]
+				if !ok {
+					d, err := s.st.GetAll(bgctx(), key)
+					if err != nil || len(d) == 0 {
+						raw[key] = nil
+						continue
+					}
+					data = d
+					raw[key] = d
+				}
+				if len(data) == 0 {
+					continue
+				}
+				cropped, ok := cropCacheGet(assetKey)
+				if !ok {
+					c, err := cropFigure(data, ref)
+					if err != nil {
+						continue
+					}
+					cropped = c
+					cropCachePut(assetKey, c)
+				}
+				out[assetKey] = "data:" + cropped.ctype + ";base64," + base64.StdEncoding.EncodeToString(cropped.data)
+			}
+		}
+	}
+	return out
+}
+
+func anyFigureText(texts []string) bool {
+	for _, t := range texts {
+		if strings.Contains(t, "```") && len(figureBlocks(t)) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // takeSection 从 secs 里取走第一个命中别名的字段，返回它的值和剩下的字段。
@@ -342,14 +451,14 @@ func renderMarkdown(title, stamp string, items []exportItem, fields map[string]b
 				b.WriteString("**知识点**：" + strings.Join(it.Tags, "、") + "\n\n")
 			}
 		}
-		mdField(&b, fields, "stem", "题干", it.Stem)
-		mdField(&b, fields, "answer", "我的作答", it.Answer)
-		mdField(&b, fields, "analysis", "错因要点", it.Analysis)
-		mdField(&b, fields, "solution", "答案/正解", it.Solution)
-		mdField(&b, fields, "note", "备注", it.Note)
+		mdField(&b, fields, "stem", "题干", it.Stem, it.figureSrcMD)
+		mdField(&b, fields, "answer", "我的作答", it.Answer, it.figureSrcMD)
+		mdField(&b, fields, "analysis", "错因要点", it.Analysis, it.figureSrcMD)
+		mdField(&b, fields, "solution", "答案/正解", it.Solution, it.figureSrcMD)
+		mdField(&b, fields, "note", "备注", it.Note, it.figureSrcMD)
 		if fields["other"] {
 			for _, s := range it.Other {
-				mdField(&b, fields, "other", s.Key, s.Value)
+				mdField(&b, fields, "other", s.Key, s.Value, it.figureSrcMD)
 			}
 		}
 		if fields["image"] && it.ImageSrc != "" {
@@ -359,7 +468,7 @@ func renderMarkdown(title, stamp string, items []exportItem, fields map[string]b
 	return b.String()
 }
 
-func mdField(b *strings.Builder, fields map[string]bool, id, label, val string) {
+func mdField(b *strings.Builder, fields map[string]bool, id, label, val string, fig func(FigureRef) (string, bool)) {
 	if !fields[id] {
 		return
 	}
@@ -367,7 +476,50 @@ func mdField(b *strings.Builder, fields map[string]bool, id, label, val string) 
 	if v == "" {
 		return
 	}
-	b.WriteString("**" + label + "**：" + v + "\n\n")
+	b.WriteString("**" + label + "**：" + mdValue(v, fig) + "\n\n")
+}
+
+// mdValue 把文本里的 figure 块换成 `![图示](预签名链接#fig=x,y,w,h)`，
+// 其余内容逐行原样保留。
+func mdValue(v string, fig func(FigureRef) (string, bool)) string {
+	if fig == nil || !strings.Contains(v, "```") {
+		return v
+	}
+	replace := map[int]string{}
+	skip := map[int]bool{}
+	for _, blk := range scanFences(v) {
+		if !strings.EqualFold(blk.Info, figureFenceInfo) {
+			continue
+		}
+		ref, ok := parseFigureBody(blk.Body)
+		if !ok {
+			continue
+		}
+		text, ok := fig(ref)
+		if !ok {
+			continue
+		}
+		replace[blk.Start] = text
+		for i := blk.Start + 1; i <= blk.End; i++ {
+			skip[i] = true
+		}
+	}
+	if len(replace) == 0 {
+		return v
+	}
+	lines := strings.Split(v, "\n")
+	var out []string
+	for i, ln := range lines {
+		if t, ok := replace[i]; ok {
+			out = append(out, t)
+			continue
+		}
+		if skip[i] {
+			continue
+		}
+		out = append(out, ln)
+	}
+	return strings.Join(out, "\n")
 }
 
 // ============================================================================
@@ -415,6 +567,8 @@ table.meta th { background: #f5f7fa; color: var(--muted); font-weight: 600;
 .stembox .v, .refbox .v { white-space: pre-wrap; overflow-wrap: anywhere; }
 .stembox .v p, .refbox .v p, .f .v p { margin: 4px 0; }
 .v pre.fig { font-family: ui-monospace, SFMono-Regular, Consolas, "Courier New", monospace; font-size: 12px; line-height: 1.45; white-space: pre; overflow-x: auto; background: #f6f7f9; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 6px 0; }
+.figcrop { margin: 6px 0; }
+.figcrop img { display: block; max-width: 100%; max-height: 320px; border: 1px solid var(--line); border-radius: 6px; }
 .stembox .v ul, .refbox .v ul, .f .v ul { margin: 4px 0; padding-left: 20px; }
 .blank { flex: 1; min-height: 110px; border-top: 1px dashed var(--line); margin-top: 10px; }
 
@@ -481,14 +635,15 @@ func metaTable(it exportItem) string {
 }
 
 // htmlValue 把一段纯文本按行渲染成 <p>/<ul>/<pre>，全部 textContent 级转义。
-// 三个反引号独占一行的围栏块按字符画处理：<pre class="fig"> 等宽保留空格。
-func htmlValue(v string) string {
+// 三个反引号独占一行的围栏块按字符画处理：<pre class="fig"> 等宽保留空格；
+// 声明为 figure 且能解析的块改渲染成按框裁好的题图。
+func htmlValue(v string, fig func(FigureRef) (string, bool)) string {
 	var b strings.Builder
-	writeHTMLValue(&b, v)
+	writeHTMLValue(&b, v, fig)
 	return b.String()
 }
 
-func writeHTMLValue(b *strings.Builder, v string) {
+func writeHTMLValue(b *strings.Builder, v string, fig func(FigureRef) (string, bool)) {
 	inUL := false
 	inFig := false
 	flushUL := func() {
@@ -497,10 +652,12 @@ func writeHTMLValue(b *strings.Builder, v string) {
 			inUL = false
 		}
 	}
-	for _, ln := range strings.Split(v, "\n") {
+	lines := strings.Split(v, "\n")
+	for i := 0; i < len(lines); i++ {
+		ln := lines[i]
 		t := strings.TrimSpace(ln)
 		if inFig {
-			if strings.HasPrefix(t, "```") {
+			if isFenceLine(t) {
 				b.WriteString("</pre>")
 				inFig = false
 			} else {
@@ -508,7 +665,27 @@ func writeHTMLValue(b *strings.Builder, v string) {
 			}
 			continue
 		}
-		if strings.HasPrefix(t, "```") {
+		if isFenceLine(t) {
+			// figure 块：整块换成裁好的题图；解析失败或取不到图就按字符画降级
+			if fig != nil && isFigureFenceLine(t) {
+				end := -1
+				for j := i + 1; j < len(lines); j++ {
+					if isFenceLine(lines[j]) {
+						end = j
+						break
+					}
+				}
+				if end > 0 {
+					if ref, ok := parseFigureBody(lines[i+1 : end]); ok {
+						if snippet, ok := fig(ref); ok {
+							flushUL()
+							b.WriteString(snippet + "\n")
+							i = end
+							continue
+						}
+					}
+				}
+			}
 			flushUL()
 			b.WriteString(`<pre class="fig">`)
 			inFig = true
@@ -538,12 +715,12 @@ func writeHTMLValue(b *strings.Builder, v string) {
 // 一个都没选中或全为空就返回空串（题干块下面不留参考区）。
 func refBox(it exportItem, fields map[string]bool) string {
 	var inner strings.Builder
-	htmlField(&inner, fields, "answer", "我的作答", it.Answer)
-	htmlField(&inner, fields, "solution", "答案/正解", it.Solution)
-	htmlField(&inner, fields, "analysis", "错因要点", it.Analysis)
+	htmlField(&inner, fields, "answer", "我的作答", it.Answer, it.figureSrcHTML)
+	htmlField(&inner, fields, "solution", "答案/正解", it.Solution, it.figureSrcHTML)
+	htmlField(&inner, fields, "analysis", "错因要点", it.Analysis, it.figureSrcHTML)
 	if fields["other"] {
 		for _, s := range it.Other {
-			htmlField(&inner, fields, "other", s.Key, s.Value)
+			htmlField(&inner, fields, "other", s.Key, s.Value, it.figureSrcHTML)
 		}
 	}
 	if fields["image"] && it.ImageSrc != "" {
@@ -596,14 +773,14 @@ func renderHTML(title, stamp string, items []exportItem, fields map[string]bool,
 				stem := strings.TrimSpace(it.Stem)
 				b.WriteString(`<div class="stembox"><div class="boxk">题干</div>`)
 				if stem != "" {
-					b.WriteString(`<div class="v">` + htmlValue(stem) + `</div>`)
+					b.WriteString(`<div class="v">` + htmlValue(stem, it.figureSrcHTML) + `</div>`)
 				}
 				b.WriteString(`<div class="blank"></div></div>` + "\n")
 			}
 			b.WriteString(refBox(it, fields) + "\n")
 			if fields["note"] && strings.TrimSpace(it.Note) != "" {
 				b.WriteString(`<div class="note"><span class="k">备注</span>` +
-					htmlValue(it.Note) + "</div>\n")
+					htmlValue(it.Note, it.figureSrcHTML) + "</div>\n")
 			}
 			b.WriteString("</article>\n")
 		}
@@ -634,7 +811,7 @@ document.addEventListener('DOMContentLoaded', function () {
 	return b.String()
 }
 
-func htmlField(b *strings.Builder, fields map[string]bool, id, label, val string) {
+func htmlField(b *strings.Builder, fields map[string]bool, id, label, val string, fig func(FigureRef) (string, bool)) {
 	if !fields[id] {
 		return
 	}
@@ -643,7 +820,7 @@ func htmlField(b *strings.Builder, fields map[string]bool, id, label, val string
 		return
 	}
 	b.WriteString("<div class=\"f\"><div class=\"k\">" + html.EscapeString(label) + "</div><div class=\"v\">")
-	writeHTMLValue(b, v)
+	writeHTMLValue(b, v, fig)
 	b.WriteString("</div></div>\n")
 }
 
