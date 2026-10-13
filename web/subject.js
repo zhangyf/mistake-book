@@ -20,9 +20,8 @@ views.subject = (function () {
 
   // 导出：格式与内容可选项（与后端 api_export.go 的 exportFields 对应）
   var FORMATS = [
-    ['md', 'Markdown（.md，纯文本）'],
-    ['html', 'HTML（.html，单文件，断网可看）'],
-    ['pdf', 'PDF（生成排版页后唤起打印，在对话框里选「另存为 PDF」）']
+    ['html', 'HTML 排版卷（单文件，可打印 / 另存为 PDF）'],
+    ['md', 'Markdown（.md，纯文本）']
   ];
   var EXPORT_FIELDS = [
     ['meta', '元信息（科目/试卷/日期/题号/出处/知识点/对错）'],
@@ -34,7 +33,8 @@ views.subject = (function () {
     ['image', '原图'],
     ['other', 'md 里的其他字段']
   ];
-  var DEFAULT_FIELDS = ['meta', 'stem', 'answer', 'analysis', 'solution', 'note'];
+  // 默认按「重做练习卷」配：只要元信息 + 题干 + 备注，作答/错因是答案，默认不带
+  var DEFAULT_FIELDS = ['meta', 'stem', 'note'];
 
   function render(main, subject) {
     state.subject = subject;
@@ -282,12 +282,36 @@ views.subject = (function () {
       }
       grid.appendChild(right);
 
-      box.appendChild(editor(d, detailWrap));
+      box.appendChild(actions(d, detailWrap));
       app.math(box);
     }).catch(function (e) {
       box.textContent = '';
       box.appendChild(app.el('div', 'empty', '详情加载失败：' + e.message));
     });
+  }
+
+  // actions —— 查看态只给「编辑 / 删除」两个按钮；点了编辑才换成表单。
+  // 之前是详情一展开就铺满输入框，看着像误入编辑模式，老师明确说不对。
+  function actions(d, detailWrap) {
+    var wrap = app.el('div', 'actions');
+    var edit = app.el('button', 'primary', '编辑');
+    var del = app.el('button', 'danger', '删除');
+    wrap.appendChild(edit);
+    wrap.appendChild(del);
+
+    edit.onclick = function () {
+      wrap.replaceWith(editor(d, detailWrap));
+    };
+
+    del.onclick = function () {
+      if (!confirm('确认删除「' + (d.qno || d.id) + '」？索引里的这条记录会被移除（md 和原图保留）。')) return;
+      app.api('/api/entry?id=' + encodeURIComponent(d.id), { method: 'DELETE' }).then(function () {
+        app.toast('已删除');
+        return reload('', detailWrap);
+      }).catch(function (e) { app.toast('删除失败：' + e.message); });
+    };
+
+    return wrap;
   }
 
   // mdAnalysis —— md 里解析出的错因要点，用作编辑框的初值
@@ -300,7 +324,7 @@ views.subject = (function () {
   }
 
   // reload —— 改完不整页刷新（一刷新就回到列表顶、展开的详情也没了）：
-  // 重新拉一次列表，重画，然后把刚才那道题的详情重新打开。
+  // 重新拉一次列表，重画，然后把刚才那道题的详情重新打开（回到查看态）。
   function reload(id, detailWrap) {
     return app.api('/api/entries?subject=' + encodeURIComponent(state.subject)).then(function (d2) {
       state.items = d2.items || [];
@@ -314,8 +338,16 @@ views.subject = (function () {
     });
   }
 
+  // frow —— 编辑表单的一行：左侧固定标签 + 右侧控件（老师点名要标签）
+  function frow(label, ctrl, wide) {
+    var r = app.el('div', 'frow' + (wide ? ' wide' : ''));
+    r.appendChild(app.el('div', 'flabel', label));
+    r.appendChild(ctrl);
+    return r;
+  }
+
   function editor(d, detailWrap) {
-    var wrap = app.el('div', 'editrow');
+    var form = app.el('div', 'editform');
 
     var sel = document.createElement('select');
     [['correct', '做对了'], ['wrong', '做错了'], ['unknown', '未判定']].forEach(function (p) {
@@ -324,47 +356,46 @@ views.subject = (function () {
       if (p[0] === (d.result || 'unknown')) o.selected = true;
       sel.appendChild(o);
     });
-    wrap.appendChild(sel);
+    form.appendChild(frow('对错', sel));
 
     var exam = document.createElement('input');
     exam.type = 'text';
     exam.value = d.exam || '';
     exam.placeholder = '试卷名';
-    exam.style.minWidth = '140px';
-    wrap.appendChild(exam);
+    form.appendChild(frow('试卷', exam));
 
     var src = document.createElement('select');
-    src.appendChild(opt('', '出处：未标注'));
+    src.appendChild(opt('', '未标注'));
     SOURCES.forEach(function (sname) {
       var o = document.createElement('option');
       o.value = sname; o.textContent = sname;
       if (sname === (d.source || '')) o.selected = true;
       src.appendChild(o);
     });
-    wrap.appendChild(src);
+    form.appendChild(frow('出处', src));
 
     var tags = document.createElement('input');
     tags.type = 'text';
     tags.value = (d.tags || []).join('、');
-    tags.placeholder = '知识点，用、分隔';
-    tags.style.minWidth = '220px';
-    wrap.appendChild(tags);
-
-    var save = app.el('button', 'primary', '保存');
-    wrap.appendChild(save);
-
-    var del = app.el('button', 'danger', '删除');
-    wrap.appendChild(del);
+    tags.placeholder = '多个用 、 分隔';
+    form.appendChild(frow('知识点', tags));
 
     var ana = document.createElement('textarea');
     ana.value = d.analysis || mdAnalysis(d);
-    ana.placeholder = '错因要点（改了会覆盖 md 里解析出的那份；留空则仍显示 md 原文）';
-    wrap.appendChild(ana);
+    ana.placeholder = '留空则显示 md 里解析出的「错因/要点」原文；填了就覆盖它';
+    form.appendChild(frow('错因要点', ana, true));
 
     var note = document.createElement('textarea');
     note.value = d.note || '';
     note.placeholder = '备注';
-    wrap.appendChild(note);
+    form.appendChild(frow('备注', note, true));
+
+    var btns = app.el('div', 'fbtns');
+    var save = app.el('button', 'primary', '保存');
+    var cancel = app.el('button', 'ghost', '取消');
+    btns.appendChild(save);
+    btns.appendChild(cancel);
+    form.appendChild(btns);
 
     save.onclick = function () {
       var body = {
@@ -382,15 +413,13 @@ views.subject = (function () {
       }).catch(function (e) { app.toast('保存失败：' + e.message); });
     };
 
-    del.onclick = function () {
-      if (!confirm('确认删除「' + (d.qno || d.id) + '」？索引里的这条记录会被移除（md 和原图保留）。')) return;
-      app.api('/api/entry?id=' + encodeURIComponent(d.id), { method: 'DELETE' }).then(function () {
-        app.toast('已删除');
-        return reload('', detailWrap);
-      }).catch(function (e) { app.toast('删除失败：' + e.message); });
+    cancel.onclick = function () {
+      var hit = null;
+      state.items.forEach(function (x) { if (x.id === d.id) hit = x; });
+      if (hit) openDetail(hit, detailWrap); // 回到查看态
     };
 
-    return wrap;
+    return form;
   }
 
   // ==========================================================================
@@ -421,6 +450,15 @@ views.subject = (function () {
     FORMATS.forEach(function (f) { fmt.appendChild(opt(f[0], f[1])); });
     box.appendChild(mrow('格式', fmt));
 
+    // ---- 每页题数（只对 HTML 排版卷生效）----
+    var pp = document.createElement('select');
+    [['1', '每页 1 道（重做留白最多）'], ['2', '每页 2 道'], ['3', '每页 3 道']].forEach(function (p) {
+      pp.appendChild(opt(p[0], p[1]));
+    });
+    pp.disabled = fmt.value === 'md';
+    fmt.onchange = function () { pp.disabled = fmt.value === 'md'; };
+    box.appendChild(mrow('每页题数', pp));
+
     // ---- 内容 ----
     var checks = {};
     var grid = app.el('div', 'checks');
@@ -437,7 +475,9 @@ views.subject = (function () {
     box.appendChild(mrow('导出内容', grid, true));
 
     var hint = app.el('div', 'hint',
-      '原图：Markdown 里放 7 天有效的 COS 链接（不往 md 里塞 base64）；HTML / PDF 直接内嵌图片，单文件离线可看，文件会变大。');
+      '排版：元数据做成表格，题干放在大块里、下方留白给你重做，备注在最下面。「我的作答 / 错因要点 / 答案正解 / 原图」属于参考内容，勾了才出现在题干块下面的参考区里。' +
+      '打印：导出的 HTML 右下角有「打印」按钮，点它 → 在打印对话框里选「另存为 PDF」，不会自动弹打印。' +
+      '原图：Markdown 放 7 天有效的 COS 链接，HTML 直接内嵌（文件会变大）。');
     box.appendChild(hint);
 
     var err = app.el('div', 'hint err', '');
@@ -474,18 +514,15 @@ views.subject = (function () {
           subject: state.subject,
           ids: ids,
           format: fmt.value,
+          per_page: parseInt(pp.value, 10) || 1,
           fields: fields,
           with_image: fields.indexOf('image') >= 0
         }
       }).then(function (r) { return r.blob(); }).then(function (blob) {
         close();
-        if (fmt.value === 'pdf') {
-          app.printHTML(blob);
-          app.toast('已生成打印页，在打印对话框里选「另存为 PDF」');
-        } else {
-          app.download(blob, '错题本-' + state.subject + '-' + stamp() + '.' + (fmt.value === 'md' ? 'md' : 'html'));
-          app.toast('已导出 ' + (ids ? ids.length : state.items.length) + ' 题');
-        }
+        var n = ids ? ids.length : state.items.length;
+        app.download(blob, '错题本-' + state.subject + '-' + stamp() + '.' + (fmt.value === 'md' ? 'md' : 'html'));
+        app.toast('已导出 ' + n + ' 题' + (fmt.value === 'html' ? '，打开文件后点右下角「打印」可另存为 PDF' : ''));
       }).catch(function (e) {
         go.disabled = false;
         go.textContent = '导出';

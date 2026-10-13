@@ -101,20 +101,6 @@ var app = (function () {
     setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 3000);
   }
 
-  // printHTML —— 把导出的 HTML 塞进隐藏 iframe，页面自己会调 window.print()。
-  // 走 iframe 而不是 window.open，是为了不被弹窗拦截。
-  function printHTML(blob) {
-    var url = URL.createObjectURL(blob);
-    var f = document.createElement('iframe');
-    f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
-    f.src = url;
-    document.body.appendChild(f);
-    setTimeout(function () {
-      URL.revokeObjectURL(url);
-      f.remove();
-    }, 120000);
-  }
-
   // ---------- DOM 工具 ----------
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -195,7 +181,7 @@ var app = (function () {
   return {
     boot: boot, api: api, apiRaw: apiRaw, el: el, renderText: renderText, math: math,
     toast: toast, setToken: setToken, token: token,
-    download: download, printHTML: printHTML,
+    download: download,
     // <img> 没法带自定义头，只能把 token 拼进 URL（后端也接受 ?token=）
     withToken: function (url) {
       var t = token();

@@ -147,8 +147,8 @@ $EB serve --addr 0.0.0.0 --auth-token xxxx   # 对外暴露必须带 token
 `mistake-book serve` 起一个纯 `net/http` 的服务（端口默认 8081），前端原生 JS + 内联 KaTeX，`go:embed` 打进二进制，**零外网 CDN**。
 
 - **集中页**：各科错题本卡片（题数 / 对错 / 所属试卷）→ 点进科目。
-- **详情页**：可按 **日期 / 知识点 / 题型 / 出处 / 对错** 五个维度切换分组，支持按对错筛选、知识点多选、关键词搜索；点条目展开详情（左原图、右字段，LaTeX 由 KaTeX 渲染）。
-- **可改的字段**：对错 `result`、试卷名 `exam`、出处 `source`（四选一下拉）、错因要点 `analysis`、知识点 `tags`、备注 `note`。保存后不整页刷新，只重拉列表 + 重开当前详情。可删条目（只删索引，md 和原图保留）。
+- **详情页**：可按 **日期 / 知识点 / 题型 / 出处 / 对错** 五个维度切换分组，支持按对错筛选、知识点多选、关键词搜索；点条目展开详情（左原图、右字段，LaTeX 由 KaTeX 渲染）。**详情默认只读**，点「编辑」才进编辑表单（每个输入框都有标签：对错 / 试卷 / 出处 / 知识点 / 错因要点 / 备注）。
+- **可改的字段**：对错 `result`、试卷名 `exam`、出处 `source`（四选一下拉）、错因要点 `analysis`、知识点 `tags`、备注 `note`。保存后不整页刷新，只重拉列表 + 重开当前详情（回到查看态）。可删条目（只删索引，md 和原图保留）。
 - **导出**：详情页工具栏「导出」按钮，弹窗里选范围（当前筛选结果 / 本科目全部）、格式、内容。见下面「导出」。
 - API：`GET /api/subjects`、`GET /api/entries`、`GET|PUT|DELETE /api/entry`、`GET /api/image?key=`（后端代理，凭证不出后端）、`POST /api/export`。
 - 鉴权：`--auth-token`（或 `MISTAKE_AUTH_TOKEN`），非 loopback 监听没设 token 会拒绝启动。静态资源不鉴权，token 在页面输入后存 localStorage。
@@ -221,31 +221,31 @@ ssh -i <jrp_deploy> -o BatchMode=yes -o StrictHostKeyChecking=no root@154.8.216.
 
 ## 导出
 
-网页上点「导出」即可（后端 `POST /api/export`），两件事都能选：
+网页上点「导出」即可（后端 `POST /api/export`），范围、格式、内容、每页题数都能选。
 
 **格式**
 
 | format | 产物 | 说明 |
 |---|---|---|
-| `md` | `.md` | 纯文本，方便贴到别处 / 导入别的工具。原图放 **7 天有效的 COS 预签名链接**（不往 md 里塞 base64） |
-| `html` | `.html` | 单文件：KaTeX 的 CSS + JS + **20 个 woff2 字体全部 base64 内联**，断网也能看公式 |
-| `pdf` | — | **不做真·PDF 生成**：中文字体要嵌进 PDF 才有字，纯 Go 无依赖做不干净。改成吐一份排版好的 HTML 并自动 `window.print()`，在打印对话框里选「另存为 PDF」。公式是 KaTeX 矢量字，比截图清楚 |
+| `html`（`pdf` 是别名） | `.html` | **练习卷排版**（老师 2026-10-13 拍板）：元数据表格 + 题干大块（下方虚线留白重做）+ 备注最下面；「我的作答/错因要点/答案正解/原图」勾了才出现在题干块下面的**参考区**。`per_page` 控制每页 1/2/3 道。KaTeX 的 CSS+JS+**20 个 woff2 字体全部 base64 内联**，断网也能看公式。**不自动弹打印**——页面右下角有「打印」按钮，点它 → 打印对话框里选「另存为 PDF」。不做真·PDF 生成（中文字体嵌 PDF 要几 MB，纯 Go 无依赖不划算） |
+| `md` | `.md` | 纯文本，方便贴到别处 / 导入别的工具。原图放 **7 天有效的 COS 预签名链接**（不往 md 里塞 base64），per_page 对它无效 |
 
 **内容**（`fields`，可多选）：`meta` 元信息 / `stem` 题干 / `answer` 我的作答 / `analysis` 错因要点 / `solution` 答案正解 / `note` 备注 / `image` 原图 / `other` md 里的其他字段。
+网页默认只勾 `meta / stem / note`（重做练习卷的配法，作答和错因是答案，默认不带）。
 
 **范围**：`ids` 传空 = 导出该科目全部（按日期排序）；传 id 数组 = 只导出这些、按给定顺序（前端「当前筛选结果」走这条）。
 
 ```bash
 curl -X POST -H 'X-Mistake-Token: <token>' -H 'Content-Type: application/json' \
-  -d '{"subject":"数学","format":"md","fields":["meta","stem","answer","analysis"],"ids":null}' \
-  https://mistake.110105.xyz/api/export -o 错题本.md
+  -d '{"subject":"数学","format":"html","per_page":2,"fields":["meta","stem","note"],"ids":null}' \
+  https://mistake.110105.xyz/api/export -o 练习卷.html
 ```
 
 错因要点取值优先级：索引里的 `analysis`（老师手改过的）> md 里解析出的「错因/要点」。
 md 字段别名容错：`错因/要点`＝`错因要点`＝`错因`＝`要点`；`答案`＝`正解`＝`正确答案`。
 
-> 按固定布局批量出练习卷（A4 几栏、留作答空白、按知识点排序）仍是未做的需求，
-> 等老师给具体版式再说。当前导出是「把选中的题原样排版出来」。
+> 按固定版式批量出卷已经做了（上面的练习卷排版）。再往后要做「A4 几栏、
+> 按知识点重排、题间不留白压缩成小抄」这类，等老师给具体版式再说。
 
 ## 源码与编译
 

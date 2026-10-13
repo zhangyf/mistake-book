@@ -19,18 +19,18 @@ import (
 //
 // 格式：
 //   md   —— Markdown，纯文本，方便再贴到别处 / 导入别的工具
-//   html —— 单文件 HTML：KaTeX（CSS+JS+字体）全部内联，断网也能打开
-//   pdf  —— 不做真·PDF 生成。中文字体要嵌进 PDF 才有字，那是几 MB 的活儿，
-//           纯 Go 无依赖做不干净。改成吐一份排版好的 HTML 并自动唤起
-//           window.print()，在打印对话框里选「另存为 PDF」——公式是 KaTeX
-//           矢量字，比截图清楚，文件还小。
+//   html —— 练习卷排版（pdf 是它的别名）：元数据表格 + 题干大块（下方留白重做）
+//           + 备注在最下面，每页 1/2/3 道可选。KaTeX（CSS+JS+字体）全部内联，
+//           断网也能看公式。**不自动弹打印**——页面右下角有「打印」按钮，
+//           打印对话框里选「另存为 PDF」即可。不做真·PDF 生成：中文字体要嵌进
+//           PDF 才有字，那是几 MB 的活儿，纯 Go 无依赖做不干净。
 //
 // 内容（fields 可多选）：
 //   meta 元信息 / stem 题干 / answer 我的作答 / analysis 错因要点 /
 //   solution 答案正解 / note 备注 / image 原图 / other md 里的其他字段
 //
 // 原图：md 用 7 天有效的预签名链接（贴链接，别把几 MB base64 塞进 md）；
-// html/pdf 直接内嵌 base64，保证单文件离线可用、打印不缺图。
+// html 直接内嵌 base64，保证单文件离线可用、打印不缺图。
 // ============================================================================
 
 type exportField struct {
@@ -53,9 +53,10 @@ var exportFields = []exportField{
 type exportReq struct {
 	Subject   string   `json:"subject"`
 	IDs       []string `json:"ids"`        // 为空 = 导出该科目全部；非空 = 只导出这些（按给定顺序）
-	Format    string   `json:"format"`     // md | html | pdf
+	Format    string   `json:"format"`     // md | html（pdf 视作 html 的别名）
 	Fields    []string `json:"fields"`     // 为空 = 全选
 	WithImage bool     `json:"with_image"` // 兼容：默认跟 fields 里的 image 一致
+	PerPage   int      `json:"per_page"`   // 每页几道题：1/2/3，默认 1（只对 HTML 生效）
 	Title     string   `json:"title"`      // 可选，默认 "<科目> 错题本"
 }
 
@@ -166,6 +167,11 @@ func (s *server) handleExport(w http.ResponseWriter, r *http.Request) {
 	stamp := time.Now().Format("2006-01-02 15:04")
 	dateTag := time.Now().Format("20060102")
 
+	perPage := req.PerPage
+	if perPage < 1 || perPage > 3 {
+		perPage = 1 // 1/2/3 之外的值一律按 1，别让除零或奇怪分页进来
+	}
+
 	var out []byte
 	var ct, ext string
 	switch format {
@@ -173,7 +179,7 @@ func (s *server) handleExport(w http.ResponseWriter, r *http.Request) {
 		out = []byte(renderMarkdown(title, stamp, items, fields))
 		ct, ext = "text/markdown; charset=utf-8", ".md"
 	default:
-		out = []byte(renderHTML(title, stamp, items, fields, format == "pdf"))
+		out = []byte(renderHTML(title, stamp, items, fields, perPage))
 		ct, ext = "text/html; charset=utf-8", ".html"
 	}
 
@@ -375,37 +381,167 @@ func mdField(b *strings.Builder, fields map[string]bool, id, label, val string) 
 }
 
 // ============================================================================
-// HTML（含 PDF —— pdf 就是这份 HTML 加一句 window.print()）
+// HTML —— 练习卷排版（老师 2026-10-13 拍板的版式）：
+//   元数据 → 表格；题干 → 大块，下方留白重做；备注 → 最下面；每页 1/2/3 道可选。
+//   我的作答/错因要点/答案正解/原图属于「参考」，勾选了才出现在题干块下面的参考区。
+//   不自动弹打印：页面右下角一个「打印」按钮，点了才进打印（可选「另存为 PDF」）。
 // ============================================================================
 
 const exportPageCSS = `
-:root { --line: #e3e6ea; --muted: #6b7280; --text: #1c1f23; }
+:root { --line: #d9dee5; --muted: #6b7280; --text: #1c1f23; --accent: #2563eb; }
 * { box-sizing: border-box; }
-body { margin: 0; background: #fff; color: var(--text);
-  font: 15px/1.7 -apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif; }
-.wrap { max-width: 860px; margin: 0 auto; padding: 28px 24px 60px; }
-h1 { font-size: 22px; margin: 0 0 4px; }
-.sub { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
-article { border-top: 1px solid var(--line); padding: 18px 0 6px; break-inside: avoid; }
-article h2 { font-size: 17px; margin: 0 0 6px; }
-.meta { color: var(--muted); font-size: 13px; margin: 0 0 8px; }
+body { margin: 0; background: #eef0f3; color: var(--text);
+  font: 14px/1.7 -apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif; }
+
+.printbtn { position: fixed; right: 18px; bottom: 18px; z-index: 9; padding: 9px 16px;
+  border: 0; border-radius: 8px; background: var(--accent); color: #fff; font: inherit;
+  cursor: pointer; box-shadow: 0 4px 14px rgba(37, 99, 235, .35); }
+
+.page { display: flex; flex-direction: column; gap: 18px; max-width: 800px;
+  margin: 20px auto; padding: 26px 28px; background: #fff; border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .06); }
+.p1 .page { min-height: 1000px; }
+.p2 .page { min-height: 720px; }
+.p3 .page { min-height: 520px; }
+
+.dochead { border-bottom: 2px solid var(--line); padding-bottom: 10px; }
+.dochead h1 { font-size: 20px; margin: 0 0 4px; }
+.sub { color: var(--muted); font-size: 12px; margin: 0; }
+
+article { flex: 1; display: flex; flex-direction: column; gap: 12px; }
+article h2 { font-size: 16px; margin: 0; color: var(--accent); }
+
+table.meta { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+table.meta th, table.meta td { border: 1px solid var(--line); padding: 5px 9px;
+  text-align: left; vertical-align: top; }
+table.meta th { background: #f5f7fa; color: var(--muted); font-weight: 600;
+  white-space: nowrap; width: 1%; }
 .tag { display: inline-block; background: #eef1f5; color: var(--muted);
-  border-radius: 20px; padding: 1px 9px; font-size: 12px; margin: 0 4px 2px 0; }
-.f { margin-bottom: 12px; }
-.f .k { font-weight: 700; font-size: 13px; color: var(--muted); margin-bottom: 3px; }
-.f .v { white-space: pre-wrap; overflow-wrap: anywhere; }
-.f .v p { margin: 4px 0; }
-.f .v ul { margin: 4px 0; padding-left: 20px; }
+  border-radius: 20px; padding: 1px 9px; font-size: 11px; margin: 0 4px 2px 0; }
+
+.stembox, .refbox { border: 1.5px solid var(--line); border-radius: 8px; padding: 10px 14px; }
+.stembox { flex: 1; display: flex; flex-direction: column; }
+.boxk { font-weight: 700; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.stembox .v, .refbox .v { white-space: pre-wrap; overflow-wrap: anywhere; }
+.stembox .v p, .refbox .v p, .f .v p { margin: 4px 0; }
+.stembox .v ul, .refbox .v ul, .f .v ul { margin: 4px 0; padding-left: 20px; }
+.blank { flex: 1; min-height: 110px; border-top: 1px dashed var(--line); margin-top: 10px; }
+
+.f { margin-bottom: 8px; }
+.f:last-child { margin-bottom: 0; }
+.f .k { font-weight: 700; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
 .f img { max-width: 100%; border: 1px solid var(--line); border-radius: 6px; }
+
+.note { border-top: 1px solid var(--line); padding-top: 8px; font-size: 13px; }
+.note .k { font-weight: 700; color: var(--muted); margin-right: 6px; font-size: 12px; }
+
 @media print {
-  body { font-size: 12px; }
-  .wrap { max-width: none; padding: 0; }
-  article { page-break-inside: avoid; }
-  h1 { font-size: 18px; }
+  body { background: #fff; font-size: 12px; }
+  .printbtn { display: none; }
+  .page { max-width: none; margin: 0; padding: 0; border-radius: 0; box-shadow: none;
+    min-height: 0; height: 255mm; page-break-after: always; }
+  .page:last-child { height: auto; page-break-after: auto; }
+  .dochead h1 { font-size: 17px; }
 }
 `
 
-func renderHTML(title, stamp string, items []exportItem, fields map[string]bool, autoPrint bool) string {
+// paginate 按 perPage 切页。
+func paginate(items []exportItem, perPage int) [][]exportItem {
+	if perPage < 1 {
+		perPage = 1
+	}
+	var pages [][]exportItem
+	for i := 0; i < len(items); i += perPage {
+		end := i + perPage
+		if end > len(items) {
+			end = len(items)
+		}
+		pages = append(pages, items[i:end])
+	}
+	if pages == nil {
+		pages = [][]exportItem{{}}
+	}
+	return pages
+}
+
+// metaTable 元数据两列一组排进表格；知识点单独占一行。
+func metaTable(it exportItem) string {
+	var b strings.Builder
+	b.WriteString(`<table class="meta"><tbody>`)
+	kvs := it.Meta
+	for i := 0; i < len(kvs); i += 2 {
+		if i+1 < len(kvs) {
+			b.WriteString("<tr><th>" + html.EscapeString(kvs[i][0]) + "</th><td>" + html.EscapeString(kvs[i][1]) +
+				"</td><th>" + html.EscapeString(kvs[i+1][0]) + "</th><td>" + html.EscapeString(kvs[i+1][1]) + "</td></tr>")
+		} else {
+			b.WriteString("<tr><th>" + html.EscapeString(kvs[i][0]) +
+				"</th><td colspan=\"3\">" + html.EscapeString(kvs[i][1]) + "</td></tr>")
+		}
+	}
+	if len(it.Tags) > 0 {
+		b.WriteString(`<tr><th>知识点</th><td colspan="3">`)
+		for _, t := range it.Tags {
+			b.WriteString(`<span class="tag">` + html.EscapeString(t) + `</span>`)
+		}
+		b.WriteString("</td></tr>")
+	}
+	b.WriteString("</tbody></table>")
+	return b.String()
+}
+
+// htmlValue 把一段纯文本按行渲染成 <p>/<ul>，全部 textContent 级转义。
+func htmlValue(v string) string {
+	var b strings.Builder
+	inUL := false
+	for _, ln := range strings.Split(v, "\n") {
+		t := strings.TrimSpace(ln)
+		if t == "" {
+			continue
+		}
+		if strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ") {
+			if !inUL {
+				b.WriteString("<ul>")
+				inUL = true
+			}
+			b.WriteString("<li>" + html.EscapeString(strings.TrimSpace(t[2:])) + "</li>")
+			continue
+		}
+		if inUL {
+			b.WriteString("</ul>")
+			inUL = false
+		}
+		b.WriteString("<p>" + html.EscapeString(ln) + "</p>")
+	}
+	if inUL {
+		b.WriteString("</ul>")
+	}
+	return b.String()
+}
+
+// refBox 汇总「参考」字段：我的作答 / 答案正解 / 错因要点 / 其他字段 / 原图。
+// 一个都没选中或全为空就返回空串（题干块下面不留参考区）。
+func refBox(it exportItem, fields map[string]bool) string {
+	var inner strings.Builder
+	htmlField(&inner, fields, "answer", "我的作答", it.Answer)
+	htmlField(&inner, fields, "solution", "答案/正解", it.Solution)
+	htmlField(&inner, fields, "analysis", "错因要点", it.Analysis)
+	if fields["other"] {
+		for _, s := range it.Other {
+			htmlField(&inner, fields, "other", s.Key, s.Value)
+		}
+	}
+	if fields["image"] && it.ImageSrc != "" {
+		inner.WriteString("<div class=\"f\"><div class=\"k\">原图</div>" +
+			"<img src=\"" + it.ImageSrc + "\" alt=\"原图\"></div>\n")
+	}
+	body := strings.TrimSpace(inner.String())
+	if body == "" {
+		return ""
+	}
+	return "<div class=\"refbox\"><div class=\"boxk\">参考（作答 / 错因 / 答案）</div>" + body + "</div>"
+}
+
+func renderHTML(title, stamp string, items []exportItem, fields map[string]bool, perPage int) string {
 	css, js, autojs := katexAssets()
 
 	var b strings.Builder
@@ -423,47 +559,42 @@ func renderHTML(title, stamp string, items []exportItem, fields map[string]bool,
 		b.WriteString("<script>" + autojs + "</script>\n")
 	}
 	b.WriteString("<style>" + exportPageCSS + "</style>\n")
-	b.WriteString("</head>\n<body>\n<div class=\"wrap\">\n")
-	b.WriteString("<h1>" + html.EscapeString(title) + "</h1>\n")
-	b.WriteString("<p class=\"sub\">导出时间：" + html.EscapeString(stamp) +
-		"　共 " + strconv.Itoa(len(items)) + " 题</p>\n")
+	b.WriteString("</head>\n")
+	b.WriteString(`<body class="p` + strconv.Itoa(perPage) + "\">\n")
+	// 打印按钮：@media print 里 display:none，打印件上看不到
+	b.WriteString(`<button class="printbtn" onclick="window.print()">打印 / 另存为 PDF</button>` + "\n")
 
-	for _, it := range items {
-		b.WriteString("<article>\n<h2>" + html.EscapeString(it.Title) + "</h2>\n")
-		if fields["meta"] {
-			var ps []string
-			for _, kv := range it.Meta {
-				ps = append(ps, html.EscapeString(kv[0]+"："+kv[1]))
+	for pi, page := range paginate(items, perPage) {
+		b.WriteString("<div class=\"page\">\n")
+		if pi == 0 {
+			b.WriteString("<header class=\"dochead\"><h1>" + html.EscapeString(title) + "</h1>" +
+				"<p class=\"sub\">导出时间：" + html.EscapeString(stamp) +
+				"　共 " + strconv.Itoa(len(items)) + " 题</p></header>\n")
+		}
+		for _, it := range page {
+			b.WriteString("<article>\n<h2>" + html.EscapeString(it.Title) + "</h2>\n")
+			if fields["meta"] && (len(it.Meta) > 0 || len(it.Tags) > 0) {
+				b.WriteString(metaTable(it) + "\n")
 			}
-			if len(ps) > 0 {
-				b.WriteString("<p class=\"meta\">" + strings.Join(ps, "　") + "</p>\n")
-			}
-			if len(it.Tags) > 0 {
-				b.WriteString("<p class=\"meta\">知识点：")
-				for _, t := range it.Tags {
-					b.WriteString("<span class=\"tag\">" + html.EscapeString(t) + "</span>")
+			if fields["stem"] {
+				stem := strings.TrimSpace(it.Stem)
+				b.WriteString(`<div class="stembox"><div class="boxk">题干</div>`)
+				if stem != "" {
+					b.WriteString(`<div class="v">` + htmlValue(stem) + `</div>`)
 				}
-				b.WriteString("</p>\n")
+				b.WriteString(`<div class="blank"></div></div>` + "\n")
 			}
-		}
-		htmlField(&b, fields, "stem", "题干", it.Stem)
-		htmlField(&b, fields, "answer", "我的作答", it.Answer)
-		htmlField(&b, fields, "analysis", "错因要点", it.Analysis)
-		htmlField(&b, fields, "solution", "答案/正解", it.Solution)
-		htmlField(&b, fields, "note", "备注", it.Note)
-		if fields["other"] {
-			for _, s := range it.Other {
-				htmlField(&b, fields, "other", s.Key, s.Value)
+			b.WriteString(refBox(it, fields) + "\n")
+			if fields["note"] && strings.TrimSpace(it.Note) != "" {
+				b.WriteString(`<div class="note"><span class="k">备注</span>` +
+					htmlValue(it.Note) + "</div>\n")
 			}
+			b.WriteString("</article>\n")
 		}
-		if fields["image"] && it.ImageSrc != "" {
-			b.WriteString("<div class=\"f\"><div class=\"k\">原图</div>" +
-				"<img src=\"" + it.ImageSrc + "\" alt=\"原图\"></div>\n")
-		}
-		b.WriteString("</article>\n")
+		b.WriteString("</div>\n")
 	}
-	b.WriteString("</div>\n")
 
+	// 只做公式渲染，不自动打印
 	b.WriteString(`<script>
 document.addEventListener('DOMContentLoaded', function () {
   if (window.renderMathInElement) {
@@ -479,12 +610,11 @@ document.addEventListener('DOMContentLoaded', function () {
       });
     } catch (e) {}
   }
+});
+</script>
+</body>
+</html>
 `)
-	if autoPrint {
-		// 等 KaTeX 渲染完再唤起打印，否则公式可能还是源码
-		b.WriteString("  setTimeout(function () { window.print(); }, 400);\n")
-	}
-	b.WriteString("});\n</script>\n</body>\n</html>\n")
 	return b.String()
 }
 
