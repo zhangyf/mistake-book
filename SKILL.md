@@ -145,11 +145,40 @@ $EB serve --addr 0.0.0.0 --auth-token xxxx   # 对外暴露必须带 token
 - **详情页**：可按 **日期 / 知识点 / 题型 / 对错** 四个维度切换分组，支持按对错筛选、知识点多选、关键词搜索；点条目展开详情（左原图、右字段，LaTeX 由 KaTeX 渲染）；每条可改 result / tags / note，可删条目（只删索引，md 和原图保留）。
 - API：`GET /api/subjects`、`GET /api/entries`、`GET|PUT|DELETE /api/entry`、`GET /api/image?key=`（后端代理，凭证不出后端）。
 - 鉴权：`--auth-token`（或 `MISTAKE_AUTH_TOKEN`），非 loopback 监听没设 token 会拒绝启动。静态资源不鉴权，token 在页面输入后存 localStorage。
+  - ⚠️ 前端发的是 **`X-Mistake-Token` 头，不是 `Authorization`**：线上前面还有一层 nginx Basic Auth，浏览器会自动给同源请求带 Basic 凭据，fetch 再设 `Authorization` 会把 Basic 覆盖掉，nginx 直接回 401（2026-10-13 部署时踩到：首页 200 但 /api 全 401）。
 - ⚠️ **改了 `web/` 下任何文件都必须重新编译二进制**（embed 打进去的）。
 
-### 服务器部署（154.8.216.179）
+### 服务器部署（154.8.216.179）—— 已上线
+
+线上地址 **https://mistake.110105.xyz**（2026-10-13 上线）。凭据见 `~/.workbuddy/skills/mistake-book/DEPLOY.md`（本地，**不进 git**）。
 
 跟 jrp 同一套：交叉编译 → 传二进制 → systemd → nginx 反代 → Basic Auth。
+
+**重新部署**（改了 Go 代码或 `web/` 之后必须走一遍）：
+
+```bash
+cd ~/mistake-book   # Windows: C:\Users\efrainzhang\mistake-book
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOFLAGS=-mod=mod go build -trimpath -ldflags="-s -w" -o /tmp/mistake-book-linux .
+
+KEY=~/.workbuddy/../WorkBuddy/2026-09-20-09-52-09/outputs/deploy/ssh/jrp_deploy
+ssh -i $KEY -o BatchMode=yes -o StrictHostKeyChecking=no root@154.8.216.179 'systemctl stop mistake-book'
+ssh -i $KEY -o BatchMode=yes -o StrictHostKeyChecking=no root@154.8.216.179 'cat > /usr/local/bin/mistake-book' < /tmp/mistake-book-linux
+ssh -i $KEY -o BatchMode=yes -o StrictHostKeyChecking=no root@154.8.216.179 \
+  'chmod +x /usr/local/bin/mistake-book; systemctl start mistake-book; sleep 2; systemctl is-active mistake-book'
+```
+
+验证不看服务是否活着（可能跑着旧二进制），用特征串 + 真请求：
+```bash
+ssh -i $KEY root@154.8.216.179 'strings /usr/local/bin/mistake-book | grep -c X-Mistake-Token'
+curl -s https://mistake.110105.xyz/api/subjects -u teacher:<密码> -H "X-Mistake-Token: <token>"
+```
+
+**踩过的坑**：
+1. `/etc/nginx/.mistake_htpasswd` 必须 `chown root:nginx` + `640` —— root:root 640 时 nginx worker 读不到，所有请求变 500（`open() failed (13: Permission denied)`）。
+2. 传文件用 `ssh host 'cat > x' < file` 管道，scp 会被腾讯云扫码横幅破坏。
+3. 换二进制必须 stop → cp → start，否则 `Text file busy`。
+4. `nginx.conf` 是 jrp 整份接管的，改前先 `cp` 备份再 `nginx -t`（改坏会连带 jrp）。
+5. 证书是 TrustAsia DV，90 天，2027-01-10 到期，到期前要重新申请。
 
 ```bash
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o mistake-book .

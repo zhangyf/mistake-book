@@ -177,7 +177,16 @@ func (s *server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// bearerToken 取应用层 token。
+//
+// ⚠️ 首选自定义头 X-Mistake-Token，而不是 Authorization:
+// 线上前面还有一层 nginx Basic Auth，浏览器会自动给同源请求带上 Basic 凭据；
+// 如果前端 fetch 再设 Authorization，就会把 Basic 覆盖掉，nginx 直接回 401。
+// 用独立头两个认证就能共存。（2026-10-13 部署时踩到：首页 200 但 /api 全 401）
 func bearerToken(r *http.Request) string {
+	if v := strings.TrimSpace(r.Header.Get("X-Mistake-Token")); v != "" {
+		return v
+	}
 	h := r.Header.Get("Authorization")
 	if len(h) > 7 && strings.EqualFold(h[:7], "bearer ") {
 		return strings.TrimSpace(h[7:])

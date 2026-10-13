@@ -1,0 +1,6 @@
+# 部署产物：含 token/口令，绝不进 git
+deploy/
+
+# 本地编译产物
+mistake-book
+mistake-book.exe

@@ -27,7 +27,8 @@ var app = (function () {
   function api(path, opts) {
     opts = opts || {};
     var headers = opts.headers || {};
-    if (token()) headers['Authorization'] = 'Bearer ' + token();
+    // 必须用自定义头：线上前面还有 nginx Basic Auth，占用了 Authorization 头
+    if (token()) headers['X-Mistake-Token'] = token();
     if (opts.body) headers['Content-Type'] = 'application/json';
     return fetch(path, {
       method: opts.method || 'GET',
