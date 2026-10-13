@@ -174,27 +174,41 @@ views.subject = (function () {
     order.forEach(function (k) {
       var g = app.el('div', 'group');
       g.appendChild(app.el('h3', null, k + '　(' + groups[k].length + ')'));
-      groups[k].forEach(function (it) { g.appendChild(itemRow(it, detailWrap)); });
+      var cards = app.el('div', 'qcards');
+      groups[k].forEach(function (it) { cards.appendChild(itemCard(it, detailWrap)); });
+      g.appendChild(cards);
       listWrap.appendChild(g);
     });
   }
 
-  function itemRow(it, detailWrap) {
-    var row = app.el('div', 'item');
-    var head = app.el('div', 'head');
-    // 不画对错圆点：错题本里全是要重做的题
+  // itemCard —— 卡片罗列，至少能看到一部分题干（题干预览由 /api/entries 从 md 里取）
+  function itemCard(it, detailWrap) {
+    var c = app.el('div', 'qcard');
+
+    var head = app.el('div', 'chead');
     head.appendChild(app.el('span', 'qno', it.qno || '(无题号)'));
     if (it.qtype) head.appendChild(app.el('span', 'qtype', it.qtype));
     if (it.source) head.appendChild(app.el('span', 'chip', it.source));
-    head.appendChild(app.el('span', 'qtype', it.date || ''));
-    (it.tags || []).forEach(function (t) { head.appendChild(app.el('span', 'chip', t)); });
-    row.appendChild(head);
+    c.appendChild(head);
 
-    var excerpt = it.note || '';
-    if (excerpt) row.appendChild(app.el('div', 'excerpt', excerpt));
+    var sub = app.el('div', 'csub', (it.exam || '') + (it.date ? '　' + it.date : ''));
+    c.appendChild(sub);
 
-    row.onclick = function () { openDetail(it, detailWrap); };
-    return row;
+    var body = app.el('div', 'cbody');
+    var pv = it.preview || it.note || '（无题干）';
+    var t = app.el('div', 'ctext', pv);
+    body.appendChild(t);
+    c.appendChild(body);
+    app.math(t); // 预览里可能有 $...$，渲染出来
+
+    if ((it.tags || []).length) {
+      var chips = app.el('div', 'chips');
+      it.tags.forEach(function (tg) { chips.appendChild(app.el('span', 'chip', tg)); });
+      c.appendChild(chips);
+    }
+
+    c.onclick = function () { openDetail(it, detailWrap); };
+    return c;
   }
 
   function openDetail(it, detailWrap) {
@@ -349,8 +363,8 @@ views.subject = (function () {
     var exam = document.createElement('input');
     exam.type = 'text';
     exam.value = d.exam || '';
-    exam.placeholder = '试卷名';
-    form.appendChild(frow('试卷', exam));
+    exam.placeholder = '例如：第三章 有理数';
+    form.appendChild(frow('章节', exam));
 
     var src = document.createElement('select');
     src.appendChild(opt('', '未标注'));

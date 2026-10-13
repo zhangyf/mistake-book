@@ -234,7 +234,7 @@ func (s *server) buildExportItem(e Entry, format string, withImage bool) exportI
 		it.Meta = append(it.Meta, [2]string{"日期", e.Date})
 	}
 	if e.Exam != "" {
-		it.Meta = append(it.Meta, [2]string{"试卷", e.Exam})
+		it.Meta = append(it.Meta, [2]string{"章节", e.Exam})
 	}
 	if e.Source != "" {
 		it.Meta = append(it.Meta, [2]string{"出处", e.Source})

@@ -67,6 +67,24 @@ func ParseMarkdown(md, qno string) ParsedMD {
 	return ParsedMD{Parsed: true, Heading: b.heading, Sections: sec}
 }
 
+// previewText 取题干的一段预览，给列表卡片用（列表页不该显示整道题）。
+// 折叠空白压成一行；截断时如果 $ 落单（公式被切断），退回到最后一个 $ 之前，
+// 免得卡片上出现半个公式渲染不出来。
+func previewText(s string, n int) string {
+	s = strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	cut := string(r[:n])
+	if strings.Count(cut, "$")%2 == 1 {
+		if i := strings.LastIndex(cut, "$"); i > 0 {
+			cut = cut[:i]
+		}
+	}
+	return strings.TrimSpace(cut) + "…"
+}
+
 // block 是 md 里的一个题块：标题 + 正文。
 type block struct {
 	heading string

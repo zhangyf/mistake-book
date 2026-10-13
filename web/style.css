@@ -99,19 +99,25 @@ input[type=text].search { min-width: 180px; }
   font-size: 14px; font-weight: 700; margin: 0 0 8px;
   padding-bottom: 6px; border-bottom: 1px solid var(--line); color: var(--accent);
 }
-.item {
-  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-  padding: 10px 14px; margin-bottom: 8px; cursor: pointer;
+/* 题目卡片（替代原来的行列表） */
+.qcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.qcard {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 6px;
+  transition: border-color .15s, box-shadow .15s; min-height: 132px;
 }
-.item:hover { border-color: var(--accent); }
-.item .head { display: flex; align-items: baseline; gap: 8px; }
-.item .qno { font-weight: 700; }
-.item .qtype { color: var(--muted); font-size: 13px; }
-.item .result-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.item .result-dot.wrong { background: var(--wrong); }
-.item .result-dot.correct { background: var(--correct); }
-.item .result-dot.unknown { background: var(--unknown); }
-.item .excerpt { color: var(--muted); font-size: 13px; margin-top: 4px; }
+.qcard:hover { border-color: var(--accent); box-shadow: 0 2px 10px rgba(37, 99, 235, .08); }
+.qcard .chead { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
+.qcard .qno { font-weight: 700; }
+.qcard .qtype { color: var(--muted); font-size: 13px; }
+.qcard .csub { color: var(--muted); font-size: 12px; }
+.qcard .cbody { flex: 1; }
+.qcard .ctext { font-size: 13.5px; color: var(--text); line-height: 1.6;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.qcard .chips { display: flex; flex-wrap: wrap; }
+
+/* 详情里的灰字小标题（题块标题 / 无原图提示） */
+.excerpt { color: var(--muted); font-size: 13px; }
 
 /* 详情面板 */
 .detail {

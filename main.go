@@ -121,6 +121,14 @@ func ym(date string) string {
 	return date
 }
 
+// pickExam 取章节：--exam 和 --chapter 是同义词，谁填了用谁。
+func pickExam(exam, chapter string) string {
+	if strings.TrimSpace(exam) != "" {
+		return strings.TrimSpace(exam)
+	}
+	return strings.TrimSpace(chapter)
+}
+
 // buildKeys 生成 md / 图片 的 COS key。
 func buildKeys(subject, exam, date, photo, ext string) (mdKey, imgKey string) {
 	folder := fmt.Sprintf("%s/%s/%s-%s", rootPrefix, slug(subject), ym(date), slug(exam))
@@ -140,16 +148,18 @@ func entryID(subject, date, photo, qno string) string {
 func runPath(args []string) {
 	fs := flag.NewFlagSet("path", flag.ExitOnError)
 	subject := fs.String("subject", "", "科目（必填）")
-	exam := fs.String("exam", "", "试卷名（必填）")
+	exam := fs.String("exam", "", "章节（必填，如「第三章 有理数」）")
+	chapter := fs.String("chapter", "", "--exam 的同义别名")
 	date := fs.String("date", time.Now().Format("2006-01-02"), "日期 YYYY-MM-DD")
 	photo := fs.String("photo", "", "照片原始文件名（不含扩展名，必填）")
 	ext := fs.String("ext", ".jpg", "原图扩展名")
 	fs.Parse(args)
 
-	if *subject == "" || *exam == "" || *photo == "" {
-		fail("path 需要 --subject / --exam / --photo")
+	ex := pickExam(*exam, *chapter)
+	if *subject == "" || ex == "" || *photo == "" {
+		fail("path 需要 --subject / --exam（或 --chapter） / --photo")
 	}
-	mdKey, imgKey := buildKeys(*subject, *exam, *date, *photo, *ext)
+	mdKey, imgKey := buildKeys(*subject, ex, *date, *photo, *ext)
 	output(map[string]interface{}{
 		"success":    true,
 		"md_key":     mdKey,
@@ -168,14 +178,16 @@ func runUp(args []string) {
 	image := fs.String("image", "", "本地原图路径（必填）")
 	md := fs.String("md", "", "本地 md 路径（必填）")
 	subject := fs.String("subject", "", "科目（必填）")
-	exam := fs.String("exam", "", "试卷名（必填）")
+	exam := fs.String("exam", "", "章节（必填，如「第三章 有理数」）")
+	chapter := fs.String("chapter", "", "--exam 的同义别名")
 	date := fs.String("date", time.Now().Format("2006-01-02"), "日期 YYYY-MM-DD")
 	photo := fs.String("photo", "", "照片原始文件名（不含扩展名），默认取本地图片文件名")
 	expires := fs.Int("expires", 24, "预签名 URL 有效小时数，0 = 不生成")
 	fs.Parse(args)
 
-	if *image == "" || *md == "" || *subject == "" || *exam == "" {
-		fail("up 需要 --image / --md / --subject / --exam")
+	ex := pickExam(*exam, *chapter)
+	if *image == "" || *md == "" || *subject == "" || ex == "" {
+		fail("up 需要 --image / --md / --subject / --exam（或 --chapter）")
 	}
 	stem := *photo
 	if stem == "" {
@@ -185,7 +197,7 @@ func runUp(args []string) {
 	if ext == "" {
 		ext = ".jpg"
 	}
-	mdKey, imgKey := buildKeys(*subject, *exam, *date, stem, ext)
+	mdKey, imgKey := buildKeys(*subject, ex, *date, stem, ext)
 
 	st, err := NewStorage()
 	if err != nil {
@@ -331,7 +343,8 @@ func runIndexRm(args []string) {
 func runList(args []string) {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	subject := fs.String("subject", "", "按科目过滤（精确）")
-	exam := fs.String("exam", "", "按试卷名过滤（子串）")
+	exam := fs.String("exam", "", "按章节过滤（子串）")
+	chapter := fs.String("chapter", "", "--exam 的同义别名")
 	result := fs.String("result", "", "correct / wrong / unknown")
 	limit := fs.Int("limit", 0, "只返回最后 N 条")
 	fs.Parse(args)
@@ -351,7 +364,7 @@ func runList(args []string) {
 		if *subject != "" && it.Subject != *subject {
 			continue
 		}
-		if *exam != "" && !strings.Contains(it.Exam, *exam) {
+		if ex := pickExam(*exam, *chapter); ex != "" && !strings.Contains(it.Exam, ex) {
 			continue
 		}
 		if *result != "" && it.Result != *result {

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // ============================================================================
@@ -78,7 +79,7 @@ func (s *server) handleSubjects(w http.ResponseWriter, r *http.Request) {
 type entryItem struct {
 	ID        string   `json:"id"`
 	Subject   string   `json:"subject"`
-	Exam      string   `json:"exam"`
+	Exam      string   `json:"exam"` // 章节（字段名沿用 exam，索引/路径都靠它，不改名）
 	Date      string   `json:"date"`
 	Qno       string   `json:"qno"`
 	Qtype     string   `json:"qtype"`
@@ -86,8 +87,73 @@ type entryItem struct {
 	Source    string   `json:"source"`
 	Tags      []string `json:"tags"`
 	Note      string   `json:"note"`
+	Preview   string   `json:"preview"` // 题干预览，列表卡片用
 	ImageKey  string   `json:"image_key"`
+	MdKey     string   `json:"md_key"`
 	UpdatedAt string   `json:"updated_at"`
+}
+
+// ============================================================================
+// 题干预览
+//
+// 题干在 md 里，索引里没有。列表页想让老师一眼看到题目，就得把 md 拉下来。
+// 按 md_key 缓存（md 一旦录入基本不改，不做失效），并发 8 路拉。
+// ============================================================================
+
+var (
+	previewMu    sync.Mutex
+	previewCache = map[string]string{}
+)
+
+func (s *server) previewOf(mdKey, qno string) string {
+	if mdKey == "" {
+		return ""
+	}
+	cacheKey := mdKey + "|" + qno
+
+	previewMu.Lock()
+	if v, ok := previewCache[cacheKey]; ok {
+		previewMu.Unlock()
+		return v
+	}
+	previewMu.Unlock()
+
+	var v string
+	if data, err := s.st.GetAll(bgctx(), mdKey); err == nil {
+		pm := ParseMarkdown(string(data), qno)
+		if pm.Parsed {
+			for _, sec := range pm.Sections {
+				if matchSectionKey(sec.Key, stemKeys) {
+					v = previewText(sec.Value, 90)
+					break
+				}
+			}
+		}
+		if v == "" {
+			v = previewText(pm.Raw, 90)
+		}
+	}
+
+	previewMu.Lock()
+	previewCache[cacheKey] = v
+	previewMu.Unlock()
+	return v
+}
+
+// fillPreviews 并发补齐列表里每道题的题干预览。
+func (s *server) fillPreviews(items []entryItem) {
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
+	for i := range items {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			items[i].Preview = s.previewOf(items[i].MdKey, items[i].Qno)
+		}(i)
+	}
+	wg.Wait()
 }
 
 func (s *server) handleEntries(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +185,7 @@ func (s *server) handleEntries(w http.ResponseWriter, r *http.Request) {
 			ID: it.ID, Subject: it.Subject, Exam: it.Exam, Date: it.Date,
 			Qno: it.Qno, Qtype: it.Qtype, Result: normResult(it.Result),
 			Source: it.Source, Tags: it.Tags, Note: it.Note,
-			ImageKey: it.ImageKey, UpdatedAt: it.UpdatedAt,
+			ImageKey: it.ImageKey, MdKey: it.MdKey, UpdatedAt: it.UpdatedAt,
 		})
 		facets["result"][normResult(it.Result)]++
 		if it.Qtype != "" {
@@ -137,6 +203,8 @@ func (s *server) handleEntries(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	s.fillPreviews(items)
 
 	writeJSON(w, 200, map[string]interface{}{
 		"success": true,
