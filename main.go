@@ -33,6 +33,7 @@ Commands:
   list       列出索引条目（可按科目/试卷/对错过滤）
   search     关键词检索
   get        打印某个 COS 对象的原文（默认索引指向的 md）
+  restem     维护：替换导入格式 md 里指定题号的题干（标记与正文同步重写）
   doctor     检查凭证与桶连通性
   serve      启动错题本 Web 服务（浏览 / 改 / 删）
 
@@ -44,6 +45,7 @@ Examples:
   mistake-book list --subject 数学 --result wrong
   mistake-book search --kw 乘方
   mistake-book get --key exam-bank/数学/2026-09-第一章有理数测验/2026-09-21-IMG_20260921_222934.md
+  mistake-book restem --md exam-bank/数学/2026-10-未命名/2026-10-13-import-xxx.md --qno 第4题 --stem-file new-stem.txt
   mistake-book doctor
 
   mistake-book serve                                    # 本机 http://127.0.0.1:8081
@@ -73,6 +75,8 @@ func main() {
 		runSearch(args)
 	case "get":
 		runGet(args)
+	case "restem":
+		runRestem(args)
 	case "doctor":
 		runDoctor(args)
 	case "serve":
