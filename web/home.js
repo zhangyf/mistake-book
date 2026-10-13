@@ -26,20 +26,31 @@ views.home = (function () {
 
   function card(s) {
     var c = app.el('div', 'card');
-    c.appendChild(app.el('div', 'name', s.subject));
-    c.appendChild(app.el('div', 'count', s.count + ' 题' + (s.last_date ? ' · 最近 ' + s.last_date : '')));
 
-    var chips = app.el('div', 'chips');
-    var r = s.results || {};
-    ['wrong', 'correct', 'unknown'].forEach(function (k) {
-      if (!r[k]) return;
-      var label = { wrong: '错', correct: '对', unknown: '未判定' }[k];
-      chips.appendChild(app.el('span', 'chip ' + k, label + ' ' + r[k]));
-    });
-    c.appendChild(chips);
+    // 标题 = 老师自己起的名字（没起就显示科目名）+ 右上角「改名」
+    var head = app.el('div', 'cardhead');
+    head.appendChild(app.el('div', 'name', s.name || s.subject));
+    var pen = app.el('button', 'ghost pen', '改名');
+    pen.title = '给这个错题本起个名字';
+    pen.onclick = function (e) {
+      e.stopPropagation();
+      var v = prompt('给「' + s.subject + '」这个错题本起个名字（留空恢复默认显示科目名）', s.name || s.subject);
+      if (v === null) return;
+      app.api('/api/subject', { method: 'PUT', body: { subject: s.subject, name: v.trim() } })
+        .then(function () {
+          app.toast('已保存');
+          render(document.getElementById('app'));
+        })
+        .catch(function (e2) { app.toast('保存失败：' + e2.message); });
+    };
+    head.appendChild(pen);
+    c.appendChild(head);
 
+    c.appendChild(app.el('div', 'count', s.count + ' 题 · 最近 ' + s.last_date));
+
+    // 下面这行是这科错题本里出现过的章节（原来还带「对/错」计数，已去掉）
     if (s.exams && s.exams.length) {
-      c.appendChild(app.el('div', 'exams', s.exams.join(' / ')));
+      c.appendChild(app.el('div', 'exams', '章节：' + s.exams.join(' / ')));
     }
     c.onclick = function () { location.hash = '#/subject/' + encodeURIComponent(s.subject); };
     return c;

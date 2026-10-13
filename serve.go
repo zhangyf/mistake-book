@@ -95,6 +95,7 @@ func runServe(args []string) {
 func (s *server) registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/subjects", s.requireAuth(s.handleSubjects))
 	mux.HandleFunc("/api/entries", s.requireAuth(s.handleEntries))
+	mux.HandleFunc("/api/subject", s.requireAuth(s.renameSubject))
 	mux.HandleFunc("/api/entry", s.requireAuth(s.handleEntry))
 	mux.HandleFunc("/api/image", s.requireAuth(s.handleImage))
 	mux.HandleFunc("/api/export", s.requireAuth(s.handleExport))

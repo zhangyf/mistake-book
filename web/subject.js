@@ -86,6 +86,11 @@ views.subject = (function () {
     listWrap.appendChild(app.el('div', 'empty', '加载中…'));
 
     app.api('/api/entries?subject=' + encodeURIComponent(subject)).then(function (d) {
+      // 面包屑用老师起的名字（没起就还是科目名）
+      if (d.display) {
+        var crumb = document.getElementById('crumb');
+        if (crumb) crumb.textContent = '› ' + d.display;
+      }
       state.items = d.items || [];
       state.facets = d.facets || {};
       paintTags(tagBar, main, listWrap);

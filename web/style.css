@@ -66,7 +66,9 @@ h2.section-title { font-size: 15px; color: var(--muted); font-weight: 600; margi
   transition: border-color .15s, box-shadow .15s;
 }
 .card:hover { border-color: var(--accent); box-shadow: 0 2px 10px rgba(37, 99, 235, .08); }
+.cardhead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .card .name { font-size: 17px; font-weight: 700; }
+.card .pen { font-size: 12px; padding: 2px 8px; flex: none; }
 .card .count { color: var(--muted); font-size: 13px; margin-top: 2px; }
 .card .exams { color: var(--muted); font-size: 12px; margin-top: 8px; }
 .card .chips { margin-top: 10px; }

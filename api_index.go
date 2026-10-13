@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strings"
@@ -12,11 +13,11 @@ import (
 // ============================================================================
 
 type subjectSummary struct {
-	Subject  string         `json:"subject"`
-	Count    int            `json:"count"`
-	Exams    []string       `json:"exams"`
-	Results  map[string]int `json:"results"`
-	LastDate string         `json:"last_date"`
+	Subject  string   `json:"subject"`
+	Name     string   `json:"name"` // 老师自己起的名字，没起就用科目名
+	Count    int      `json:"count"`
+	Exams    []string `json:"exams"`
+	LastDate string   `json:"last_date"`
 }
 
 func (s *server) handleSubjects(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +35,7 @@ func (s *server) handleSubjects(w http.ResponseWriter, r *http.Request) {
 		}
 		sum, ok := agg[it.Subject]
 		if !ok {
-			sum = &subjectSummary{Subject: it.Subject, Results: map[string]int{}}
+			sum = &subjectSummary{Subject: it.Subject}
 			agg[it.Subject] = sum
 			order = append(order, it.Subject)
 		}
@@ -42,11 +43,6 @@ func (s *server) handleSubjects(w http.ResponseWriter, r *http.Request) {
 		if it.Exam != "" && !contains(sum.Exams, it.Exam) {
 			sum.Exams = append(sum.Exams, it.Exam)
 		}
-		res := it.Result
-		if res == "" {
-			res = "unknown"
-		}
-		sum.Results[res]++
 		if it.Date > sum.LastDate {
 			sum.LastDate = it.Date
 		}
@@ -56,9 +52,7 @@ func (s *server) handleSubjects(w http.ResponseWriter, r *http.Request) {
 	for _, name := range order {
 		sum := agg[name]
 		sort.Strings(sum.Exams)
-		if sum.Results["correct"] == 0 && sum.Results["wrong"] == 0 && sum.Results["unknown"] == 0 {
-			sum.Results = map[string]int{}
-		}
+		sum.Name = idx.DisplayName(sum.Subject)
 		out = append(out, *sum)
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].Subject < out[b].Subject })
@@ -67,6 +61,82 @@ func (s *server) handleSubjects(w http.ResponseWriter, r *http.Request) {
 		"success":  true,
 		"total":    len(idx.Items),
 		"subjects": out,
+	})
+}
+
+// ============================================================================
+// PUT /api/subject —— 给某科目的错题本起名（老师 2026-10-13 要求）
+//
+// body: {"subject":"数学","name":"初一数学"}
+// name 为空 = 恢复默认（直接显示科目名）。
+// ============================================================================
+
+func (s *server) renameSubject(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		failJSON(w, 405, "用 PUT")
+		return
+	}
+	var req struct {
+		Subject string `json:"subject"`
+		Name    string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		failJSON(w, 400, "请求体解析失败: "+err.Error())
+		return
+	}
+	req.Subject = strings.TrimSpace(req.Subject)
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Subject == "" {
+		failJSON(w, 400, "缺少 subject")
+		return
+	}
+	if len(req.Name) > 40 {
+		failJSON(w, 400, "名字太长（40 字以内）")
+		return
+	}
+
+	var notFound bool
+	err := s.mutate(
+		func(idx *Index) error {
+			exists := false
+			for _, it := range idx.Items {
+				if it.Subject == req.Subject {
+					exists = true
+					break
+				}
+			}
+			if !exists {
+				notFound = true
+				return nil
+			}
+			if idx.Names == nil {
+				idx.Names = map[string]string{}
+			}
+			if req.Name == "" {
+				delete(idx.Names, req.Subject) // 清空 = 恢复默认
+			} else {
+				idx.Names[req.Subject] = req.Name
+			}
+			return nil
+		},
+		func(idx *Index) bool {
+			got, ok := idx.Names[req.Subject]
+			if req.Name == "" {
+				return !ok || got == ""
+			}
+			return ok && got == req.Name
+		},
+	)
+	if notFound {
+		failJSON(w, 404, "索引里没有科目 "+req.Subject)
+		return
+	}
+	if err != nil {
+		writeConflict(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]interface{}{
+		"success": true, "subject": req.Subject, "name": req.Name, "dry_run": s.dryRun,
 	})
 }
 
@@ -209,6 +279,7 @@ func (s *server) handleEntries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]interface{}{
 		"success": true,
 		"subject": subject,
+		"display": idx.DisplayName(subject), // 科目页标题用老师起的名字
 		"count":   len(items),
 		"items":   items,
 		"facets":  facets,

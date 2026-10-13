@@ -168,8 +168,17 @@ func parseEnvFile(content string) map[string]string {
 
 // Index 是 exam-bank/index.json 的结构。
 type Index struct {
-	Version int     `json:"version"`
-	Items   []Entry `json:"items"`
+	Version int               `json:"version"`
+	Items   []Entry           `json:"items"`
+	Names   map[string]string `json:"names,omitempty"` // 科目 → 错题本显示名（老师自己起的，空 = 用科目名）
+}
+
+// DisplayName 取某科目错题本的显示名：老师起过就用他的，否则用科目名。
+func (idx *Index) DisplayName(subject string) string {
+	if n := strings.TrimSpace(idx.Names[subject]); n != "" {
+		return n
+	}
+	return subject
 }
 
 // Entry 是一道题的索引条目。
@@ -195,7 +204,7 @@ type Entry struct {
 func (s *Storage) GetIndex(ctx context.Context) (*Index, error) {
 	data, err := s.store.GetAll(ctx, indexKey)
 	if err != nil || len(data) == 0 {
-		return &Index{Version: 1}, nil
+		return &Index{Version: 1, Names: map[string]string{}}, nil
 	}
 	var idx Index
 	if err := json.Unmarshal(data, &idx); err != nil {
@@ -203,6 +212,9 @@ func (s *Storage) GetIndex(ctx context.Context) (*Index, error) {
 	}
 	if idx.Version == 0 {
 		idx.Version = 1
+	}
+	if idx.Names == nil {
+		idx.Names = map[string]string{}
 	}
 	return &idx, nil
 }
