@@ -789,7 +789,7 @@ test('首页和科目页入口正确且重复路由不叠加首页', async () =>
   click(homeButton); f.emit('hashchange'); await flush();
   assert.equal(f.location.hash, '#/import');
   f.navigate('#/subject/数学'); await flush();
-  const subjectButton = all(f.main, e => e.tagName === 'button' && e.textContent === '导入照片')[0];
+  const subjectButton = all(f.main, e => e.tagName === 'button' && e.textContent === '导入')[0];
   click(subjectButton); f.emit('hashchange'); await flush();
   assert.equal(decodeURIComponent(f.location.hash), '#/import/数学');
   f.navigate('#/'); await flush(); f.emit('hashchange');

@@ -72,7 +72,7 @@ views.subject = (function () {
     search.oninput = function () { state.kw = search.value.trim().toLowerCase(); paintList(main); };
     bar.appendChild(search);
 
-    var importButton = app.el('button', 'primary', '导入照片');
+    var importButton = app.el('button', 'primary', '导入');
     importButton.onclick = function () { location.hash = '#/import/' + encodeURIComponent(subject); };
     bar.appendChild(importButton);
 
