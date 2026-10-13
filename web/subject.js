@@ -5,14 +5,13 @@ views.subject = (function () {
     subject: '',
     items: [],
     facets: {},
-    dim: 'date',        // date | tag | type | result
-    filterResult: '',
+    dim: 'date',        // date | tag | type | source
     filterTags: [],
     kw: '',
     openId: ''
   };
 
-  var DIM_LABEL = { date: '按日期', tag: '按知识点', type: '按题型', source: '按出处', result: '按对错' };
+  var DIM_LABEL = { date: '按日期', tag: '按知识点', type: '按题型', source: '按出处' };
   var SOURCES = ['校内作业', '课外班作业', '校内考试', '自我复习'];
 
   // md 里表示「错因要点」的几种写法（后端 analysisKeys 一致）
@@ -24,7 +23,7 @@ views.subject = (function () {
     ['md', 'Markdown（.md，纯文本）']
   ];
   var EXPORT_FIELDS = [
-    ['meta', '元信息（科目/试卷/日期/题号/出处/知识点/对错）'],
+    ['meta', '元信息（科目/试卷/日期/题号/出处/知识点）'],
     ['stem', '题干'],
     ['answer', '我的作答'],
     ['analysis', '错因要点'],
@@ -38,7 +37,7 @@ views.subject = (function () {
 
   function render(main, subject) {
     state.subject = subject;
-    state.items = []; state.facets = {}; state.filterTags = []; state.filterResult = '';
+    state.items = []; state.facets = {}; state.filterTags = [];
     state.kw = ''; state.openId = '';
 
     var bar = app.el('div', 'toolbar');
@@ -56,14 +55,6 @@ views.subject = (function () {
       };
       tabs.appendChild(b);
     });
-
-    var sel = document.createElement('select');
-    sel.appendChild(opt('', '全部对错'));
-    sel.appendChild(opt('wrong', '只看错的'));
-    sel.appendChild(opt('correct', '只看对的'));
-    sel.appendChild(opt('unknown', '未判定'));
-    sel.onchange = function () { state.filterResult = sel.value; paintList(main); };
-    bar.appendChild(sel);
 
     var search = document.createElement('input');
     search.type = 'text';
@@ -84,8 +75,6 @@ views.subject = (function () {
     main.appendChild(tagBar);
     var listWrap = app.el('div');
     main.appendChild(listWrap);
-    var detailWrap = app.el('div');
-    main.appendChild(detailWrap);
 
     listWrap.appendChild(app.el('div', 'empty', '加载中…'));
 
@@ -99,15 +88,14 @@ views.subject = (function () {
       state.items = d.items || [];
       state.facets = d.facets || {};
       paintTags(tagBar, main, listWrap);
-      paintList(main, listWrap, detailWrap);
+      paintList(main, listWrap);
     }).catch(function (e) {
       listWrap.textContent = '';
       listWrap.appendChild(app.el('div', 'empty', '加载失败：' + e.message));
     });
 
-    // paintList 需要拿到这三个容器
+    // paintList 需要拿到列表容器
     main._listWrap = listWrap;
-    main._detailWrap = detailWrap;
   }
 
   function opt(v, t) { var o = document.createElement('option'); o.value = v; o.textContent = t; return o; }
@@ -134,12 +122,11 @@ views.subject = (function () {
 
   function repaint() {
     var main = document.getElementById('app');
-    if (main && main._listWrap) paintList(main, main._listWrap, main._detailWrap);
+    if (main && main._listWrap) paintList(main, main._listWrap);
   }
 
   function filtered() {
     return state.items.filter(function (it) {
-      if (state.filterResult && it.result !== state.filterResult) return false;
       if (state.filterTags.length) {
         var hit = state.filterTags.some(function (t) { return (it.tags || []).indexOf(t) >= 0; });
         if (!hit) return false;
@@ -156,14 +143,13 @@ views.subject = (function () {
     switch (state.dim) {
       case 'type': return it.qtype || '未分类题型';
       case 'source': return it.source || '未标注出处';
-      case 'result': return { wrong: '错了的', correct: '做对的', unknown: '未判定' }[it.result] || '未判定';
       case 'tag': return (it.tags && it.tags.length) ? it.tags.join('、') : '未打标签';
       default: return (it.date || '').slice(0, 7) || '无日期';
     }
   }
 
-  function paintList(main, listWrap, detailWrap) {
-    if (!listWrap) { listWrap = main._listWrap; detailWrap = main._detailWrap; }
+  function paintList(main, listWrap) {
+    if (!listWrap) { listWrap = main._listWrap; }
     listWrap.textContent = '';
 
     var items = filtered();
@@ -185,14 +171,14 @@ views.subject = (function () {
       var g = app.el('div', 'group');
       g.appendChild(app.el('h3', null, k + '　(' + groups[k].length + ')'));
       var cards = app.el('div', 'qcards');
-      groups[k].forEach(function (it) { cards.appendChild(itemCard(it, detailWrap)); });
+      groups[k].forEach(function (it) { cards.appendChild(itemCard(it)); });
       g.appendChild(cards);
       listWrap.appendChild(g);
     });
   }
 
   // itemCard —— 卡片罗列，至少能看到一部分题干（题干预览由 /api/entries 从 md 里取）
-  function itemCard(it, detailWrap) {
+  function itemCard(it) {
     var c = app.el('div', 'qcard');
 
     var head = app.el('div', 'chead');
@@ -217,19 +203,41 @@ views.subject = (function () {
       c.appendChild(chips);
     }
 
-    c.onclick = function () { openDetail(it, detailWrap); };
+    c.onclick = function () { openDetail(it); };
     return c;
   }
 
-  function openDetail(it, detailWrap) {
-    detailWrap.textContent = '';
+  // openDetail —— 详情用居中浮框弹出（2026-10-13 老师：铺在列表最底下要翻到底，
+  // 太不方便），点遮罩或「关闭」收起。编辑 / 题图框选 / 删除都在浮框里照常进行。
+  function openDetail(it) {
+    // 同一时间只开一个详情浮框（保存后会重开刷新数据）
+    var old = document.querySelector('.dmask');
+    if (old) old.remove();
+
     state.openId = it.id;
-    var box = app.el('div', 'detail');
-    box.appendChild(app.el('div', 'section-title', '加载中…'));
-    detailWrap.appendChild(box);
+    var mask = app.el('div', 'mask dmask');
+    var box = app.el('div', 'modal dmodal');
+
+    // 头部：题号信息 + 关闭
+    var headRow = app.el('div', 'dhead');
+    var headTitle = app.el('span', 'qno', (it.qno || '(无题号)') + (it.qtype ? '　' + it.qtype : ''));
+    headRow.appendChild(headTitle);
+    var closeBtn = app.el('button', 'ghost dclose', '关闭');
+    headRow.appendChild(closeBtn);
+    box.appendChild(headRow);
+
+    var boxInner = app.el('div', 'detail');
+    boxInner.appendChild(app.el('div', 'section-title', '加载中…'));
+    box.appendChild(boxInner);
+    mask.appendChild(box);
+    document.body.appendChild(mask);
+
+    function close() { mask.remove(); }
+    closeBtn.onclick = close;
+    mask.onclick = function (e) { if (e.target === mask) close(); };
 
     app.api('/api/entry?id=' + encodeURIComponent(it.id)).then(function (d) {
-      box.textContent = '';
+      boxInner.textContent = '';
       // 题图（figure 块）里 @photo 指向本条的原图；exam-bank/ 开头的走 /api/image 代理
       var photoUrl = d.image_url ? app.withToken(d.image_url) : '';
       var ctx = { figureUrl: app.figureResolver(photoUrl) };
@@ -240,10 +248,10 @@ views.subject = (function () {
         sc.style.marginLeft = '8px';
         head.appendChild(sc);
       }
-      box.appendChild(head);
+      boxInner.appendChild(head);
 
       var grid = app.el('div', 'grid');
-      box.appendChild(grid);
+      boxInner.appendChild(grid);
 
       // 左：原图
       var left = app.el('div');
@@ -303,19 +311,31 @@ views.subject = (function () {
         if (raw.textContent) app.math(raw);
         if (d.analysis) addField('错因要点', d.analysis);
       }
+
+      // 知识点与备注：存在索引里（不是 md 段落），有内容才显示（2026-10-13 老师要求补上）
+      if ((d.tags || []).length) {
+        var tf = app.el('div', 'field');
+        tf.appendChild(app.el('div', 'k', '知识点'));
+        var tv = app.el('div', 'v tchips');
+        d.tags.forEach(function (tg) { tv.appendChild(app.el('span', 'chip', tg)); });
+        tf.appendChild(tv);
+        right.appendChild(tf);
+      }
+      if (d.note) addField('备注', d.note);
+
       grid.appendChild(right);
 
-      box.appendChild(actions(d, detailWrap, ctx));
-      app.math(box);
+      boxInner.appendChild(actions(d, ctx));
+      app.math(boxInner);
     }).catch(function (e) {
-      box.textContent = '';
-      box.appendChild(app.el('div', 'empty', '详情加载失败：' + e.message));
+      boxInner.textContent = '';
+      boxInner.appendChild(app.el('div', 'empty', '详情加载失败：' + e.message));
     });
   }
 
   // actions —— 查看态只给「编辑 / 删除」两个按钮；点了编辑才换成表单。
   // 之前是详情一展开就铺满输入框，看着像误入编辑模式，老师明确说不对。
-  function actions(d, detailWrap, ctx) {
+  function actions(d, ctx) {
     var wrap = app.el('div', 'actions');
     var edit = app.el('button', 'primary', '编辑');
     var del = app.el('button', 'danger', '删除');
@@ -323,18 +343,25 @@ views.subject = (function () {
     wrap.appendChild(del);
 
     edit.onclick = function () {
-      wrap.replaceWith(editor(d, detailWrap, ctx));
+      wrap.replaceWith(editor(d, ctx));
     };
 
     del.onclick = function () {
       if (!confirm('确认删除「' + (d.qno || d.id) + '」？索引里的这条记录会被移除（md 和原图保留）。')) return;
       app.api('/api/entry?id=' + encodeURIComponent(d.id), { method: 'DELETE' }).then(function () {
         app.toast('已删除');
-        return reload('', detailWrap);
+        closeDetail();
+        return reload('');
       }).catch(function (e) { app.toast('删除失败：' + e.message); });
     };
 
     return wrap;
+  }
+
+  // closeDetail —— 关掉当前打开的详情浮框（删除题目后用）
+  function closeDetail() {
+    var m = document.querySelector('.dmask');
+    if (m) m.remove();
   }
 
   // mdAnalysis —— md 里解析出的错因要点，用作编辑框的初值
@@ -346,9 +373,9 @@ views.subject = (function () {
     return '';
   }
 
-  // reload —— 改完不整页刷新（一刷新就回到列表顶、展开的详情也没了）：
-  // 重新拉一次列表，重画，然后把刚才那道题的详情重新打开（回到查看态）。
-  function reload(id, detailWrap) {
+  // reload —— 改完不整页刷新（一刷新就回到列表顶、浮框也没了）：
+  // 重新拉一次列表，重画；传了 id 就把那道题的详情浮框重新打开（回到查看态）。
+  function reload(id) {
     return app.api('/api/entries?subject=' + encodeURIComponent(state.subject)).then(function (d2) {
       state.items = d2.items || [];
       state.facets = d2.facets || {};
@@ -356,8 +383,7 @@ views.subject = (function () {
       if (!id) return;
       var hit = null;
       state.items.forEach(function (x) { if (x.id === id) hit = x; });
-      if (hit && detailWrap) openDetail(hit, detailWrap);
-      else if (detailWrap) detailWrap.textContent = '';
+      if (hit) openDetail(hit);
     });
   }
 
@@ -394,7 +420,7 @@ views.subject = (function () {
     return { node: wrap, input: ta };
   }
 
-  function editor(d, detailWrap, ctx) {
+  function editor(d, ctx) {
     var form = app.el('div', 'editform');
 
     // 题干与我的作答存在 md 里，改它们会重写题目原文
@@ -504,14 +530,14 @@ views.subject = (function () {
       if (ansBox.input.value !== ans0) body.student_answer = ansBox.input.value;
       app.api('/api/entry', { method: 'PUT', body: body }).then(function () {
         app.toast('已保存');
-        return reload(d.id, detailWrap);
+        return reload(d.id);
       }).catch(function (e) { app.toast('保存失败：' + e.message); });
     };
 
     cancel.onclick = function () {
       var hit = null;
       state.items.forEach(function (x) { if (x.id === d.id) hit = x; });
-      if (hit) openDetail(hit, detailWrap); // 回到查看态
+      if (hit) openDetail(hit); // 回到查看态
     };
 
     return form;
@@ -538,7 +564,60 @@ views.subject = (function () {
     var scope = document.createElement('select');
     scope.appendChild(opt('filtered', '当前筛选结果（' + cur.length + ' 题）'));
     scope.appendChild(opt('all', '本科目全部（' + state.items.length + ' 题）'));
+    scope.appendChild(opt('manual', '手动选题（自己勾）'));
     box.appendChild(mrow('范围', scope));
+
+    // ---- 手动选题清单（选了「手动选题」才展开）----
+    var pickWrap = app.el('div', 'pickwrap');
+    pickWrap.style.display = 'none';
+
+    var pickBar = app.el('div', 'pickbar');
+    var pickCount = app.el('span', 'pickcount', '已选 0 题');
+    var allBtn = app.el('button', 'ghost', '全选');
+    var noneBtn = app.el('button', 'ghost', '清空');
+    pickBar.appendChild(pickCount);
+    pickBar.appendChild(allBtn);
+    pickBar.appendChild(noneBtn);
+    pickWrap.appendChild(pickBar);
+
+    var checks2 = {};
+    var pickList = app.el('div', 'picklist');
+    cur.forEach(function (it2) {
+      var lab = document.createElement('label');
+      lab.className = 'pickitem';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = it2.id;
+      lab.appendChild(cb);
+      var txt = app.el('span', null,
+        (it2.qno || '(无题号)') + (it2.qtype ? '　' + it2.qtype : '') + '　' +
+        ((it2.preview || '').replace(/\s+/g, ' ').slice(0, 46) || '（无题干）'));
+      lab.appendChild(txt);
+      pickList.appendChild(lab);
+      checks2[it2.id] = cb;
+      cb.onchange = syncCount;
+    });
+    pickWrap.appendChild(pickList);
+    if (!cur.length) {
+      pickWrap.appendChild(app.el('div', 'hint', '当前筛选结果为空，先调整筛选或换「本科目全部」。'));
+    }
+
+    function syncCount() {
+      var n = Object.keys(checks2).filter(function (k) { return checks2[k].checked; }).length;
+      pickCount.textContent = '已选 ' + n + ' 题';
+    }
+    allBtn.onclick = function () {
+      Object.keys(checks2).forEach(function (k) { checks2[k].checked = true; });
+      syncCount();
+    };
+    noneBtn.onclick = function () {
+      Object.keys(checks2).forEach(function (k) { checks2[k].checked = false; });
+      syncCount();
+    };
+    scope.onchange = function () {
+      pickWrap.style.display = scope.value === 'manual' ? '' : 'none';
+    };
+    box.appendChild(mrow('题目', pickWrap, true));
 
     // ---- 格式 ----
     var fmt = document.createElement('select');
@@ -593,11 +672,16 @@ views.subject = (function () {
     go.onclick = function () {
       var fields = Object.keys(checks).filter(function (k) { return checks[k].checked; });
       if (!fields.length) { err.textContent = '至少勾一项导出内容'; return; }
-      var ids = scope.value === 'filtered'
-        ? cur.map(function (it) { return it.id; })
-        : null;
-      if (ids && !ids.length) { err.textContent = '当前筛选结果为空'; return; }
-      if (!ids && !state.items.length) { err.textContent = '本科目没有题目'; return; }
+      var ids = null;
+      if (scope.value === 'filtered') {
+        ids = cur.map(function (it) { return it.id; });
+        if (!ids.length) { err.textContent = '当前筛选结果为空'; return; }
+      } else if (scope.value === 'manual') {
+        ids = Object.keys(checks2).filter(function (k) { return checks2[k].checked; });
+        if (!ids.length) { err.textContent = '手动选题：至少勾一道题'; return; }
+      } else if (!state.items.length) {
+        err.textContent = '本科目没有题目'; return;
+      }
 
       err.textContent = '';
       go.disabled = true;

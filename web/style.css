@@ -162,6 +162,32 @@ input[type=text].search { min-width: 180px; }
 
 .empty { color: var(--muted); padding: 30px; text-align: center; }
 
+/* 详情浮框（居中弹窗，2026-10-13）：比导出弹窗宽，左原图右字段 */
+.modal.dmodal { width: 1080px; padding: 14px 18px 18px; }
+.dhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
+.dhead .qno { font-size: 16px; }
+.dclose { flex: none; }
+/* 浮框里的详情不再需要卡片外壳（modal 本身就是卡片） */
+.modal .detail { border: none; background: none; padding: 0; margin: 0; }
+/* 详情里的知识点 chips */
+.tchips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+
+/* 导出弹窗：手动选题清单 */
+.pickwrap { flex: 1; min-width: 0; }
+.pickbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.pickcount { color: var(--muted); font-size: 13px; margin-right: auto; }
+.picklist {
+  max-height: 240px; overflow: auto; border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 10px;
+}
+.pickitem {
+  display: flex; align-items: flex-start; gap: 8px; padding: 4px 2px;
+  font-size: 13px; cursor: pointer; border-bottom: 1px dashed var(--line);
+}
+.pickitem:last-child { border-bottom: none; }
+.pickitem input { margin: 3px 0 0; flex: none; }
+.pickitem span { overflow-wrap: anywhere; }
+
 /* 导出弹窗 */
 .mask {
   position: fixed; inset: 0; background: rgba(20, 22, 26, .45);

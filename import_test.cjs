@@ -47,6 +47,7 @@ class Element {
   }
   addEventListener(name, fn) { this.events = this.events || {}; (this.events[name] = this.events[name] || []).push(fn); }
   setPointerCapture() {}
+  click() {}
   getBoundingClientRect() { return { left: 0, top: 0, width: 400, height: 300 }; }
 }
 class TestFormData {
@@ -55,7 +56,7 @@ class TestFormData {
   get(key) { return this.values.get(key); }
 }
 const all = (root, predicate) => [root, ...root.children.flatMap(c => all(c, () => true))].filter(predicate);
-const byClass = (root, name) => all(root, e => e.className.split(' ').includes(name));
+const byClass = (roots, name) => (Array.isArray(roots) ? roots : [roots]).flatMap(r => all(r, e => e.className.split(' ').includes(name)));
 const byName = (root, name) => all(root, e => e.name === name)[0];
 const click = element => element.onclick({ stopPropagation() {} });
 // 模拟一次拖拽框选：crop.js 的 pointerdown/move/up 都挂在 .cropstage 上
@@ -66,7 +67,7 @@ const drag = (stage, from, to) => {
   fire('pointermove', to.x, to.y);
   fire('pointerup', to.x, to.y);
 };
-const buttonWith = (root, text) => all(root, e => e.tagName === 'button' && e.textContent === text)[0];
+const buttonWith = (roots, text) => (Array.isArray(roots) ? roots : [roots]).flatMap(r => all(r, e => e.tagName === 'button' && e.textContent === text))[0];
 const input = (element, value) => { element.value = value; (element.oninput || element.onchange)(); };
 const check = photo => { const el = byClass(photo, 'import-reviewed')[0]; el.checked = true; el.onchange(); };
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -78,6 +79,7 @@ const deferred = () => { let resolve, reject; const promise = new Promise((r, j)
 
 function fixture({ config = {}, hash = '#/import/数学', dateClass = Date, entries = null, entry = null } = {}) {
   const nodes = Object.fromEntries(['app', 'crumb', 'toast', 'token-state', 'btn-token'].map(id => [id, new Element('div')]));
+  const body = new Element('body');
   const listeners = new Map();
   const calls = [], prompts = [], replies = [], createdURLs = [], revokedURLs = [], mathCalls = [];
   const location = { hash, pathname: '/', search: '' };
@@ -103,7 +105,14 @@ function fixture({ config = {}, hash = '#/import/数学', dateClass = Date, entr
   const context = vm.createContext({
     window, location,
     history: { replaceState: (_, __, url) => { location.hash = url.includes('#') ? url.slice(url.indexOf('#')) : ''; } },
-    document: { getElementById: id => nodes[id], createElement: tag => new Element(tag), createTextNode: text => { const n = new Element('#text'); n.textContent = text; return n; }, body: new Element('body') },
+    document: {
+      getElementById: id => nodes[id],
+      createElement: tag => new Element(tag),
+      createTextNode: text => { const n = new Element('#text'); n.textContent = text; return n; },
+      body,
+      // 详情浮框挂在 body 下；querySelector 只需支持 .class 形式
+      querySelector: sel => (sel.startsWith('.') ? (byClass(body, sel.slice(1))[0] || null) : null)
+    },
     localStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
     confirm: message => { prompts.push(message); return replies.length ? replies.shift() : true; },
     prompt: () => null,
@@ -122,8 +131,9 @@ function fixture({ config = {}, hash = '#/import/数学', dateClass = Date, entr
       else if (url === '/api/entry') data = { success: true, id: JSON.parse(options.body).id, dry_run: false };
       else if (url === '/api/import/recognize') data = await control.recognize(call);
       else if (url === '/api/import/confirm') data = await control.confirm(call);
+      else if (url === '/api/export') data = { success: true };
       else throw new Error('未模拟的请求：' + url);
-      return { ok: true, status: 200, json: async () => data };
+      return { ok: true, status: 200, json: async () => data, blob: async () => ({ size: 100 }) };
     }
   });
   for (const script of ['app.js', 'crop.js', 'home.js', 'subject.js', 'import.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, 'web', script), 'utf8'), context, { filename: script });
@@ -137,7 +147,7 @@ function fixture({ config = {}, hash = '#/import/数学', dateClass = Date, entr
   const confirmPhoto = photo => click(byClass(photo, 'import-confirm')[0]);
   const requests = suffix => calls.filter(c => c.url === '/api/import/' + suffix);
   const navigate = hash => { location.hash = hash; emit('hashchange'); };
-  return { context, main, nodes, calls, control, prompts, replies, createdURLs, revokedURLs, mathCalls, location, emit, listeners, photos, add, recognize, confirmPhoto, requests, navigate };
+  return { context, main, body, nodes, calls, control, prompts, replies, createdURLs, revokedURLs, mathCalls, location, emit, listeners, photos, add, recognize, confirmPhoto, requests, navigate };
 }
 async function readyFixture(count = 1) {
   const f = fixture(); await flush();
@@ -880,35 +890,37 @@ async function openEditor(f) {
   if (!byClass(f.main, 'qcard').length) console.error('DBG', JSON.stringify(f.main.textContent), f.calls.map(c => c.url));
   click(byClass(f.main, 'qcard')[0]);
   await flush();
-  click(buttonWith(f.main, '编辑'));
+  // 详情是浮框，挂在 body 下
+  click(buttonWith([f.main, f.body], '编辑'));
   await flush();
 }
 
 test('编辑已有题目时能在原图上框选题图，并随题干保存', async () => {
   const f = detailFixture();
   await openEditor(f);
+  const inModal = [f.main, f.body]; // 编辑表单在详情浮框里（body 下）
 
-  assert.equal(byClass(f.main, 'figcropper').length, 1, '编辑表单里要有框选面板');
-  const stage = byClass(f.main, 'cropstage')[0];
+  assert.equal(byClass(inModal, 'figcropper').length, 1, '编辑表单里要有框选面板');
+  const stage = byClass(inModal, 'cropstage')[0];
   assert.ok(stage, '原图要作为框选画布出现');
   assert.match(String(stage.children[0].src), /^\/api\/image\?key=/, '原图仍走后端代理');
   assert.match(String(stage.children[0].src), /token=test-token/, 'img 带不上头，token 拼在 URL 上');
 
   // 没进框选模式时拖拽不生效
   drag(stage, { x: 20, y: 20 }, { x: 220, y: 170 });
-  assert.equal(byClass(f.main, 'stem-input')[0].value.includes('```figure'), false);
+  assert.equal(byClass(inModal, 'stem-input')[0].value.includes('```figure'), false);
 
-  click(buttonWith(f.main, '框选原图'));
+  click(buttonWith(inModal, '框选原图'));
   drag(stage, { x: 40, y: 30 }, { x: 240, y: 180 });
 
-  const stem = byClass(f.main, 'stem-input')[0].value;
+  const stem = byClass(inModal, 'stem-input')[0].value;
   assert.match(stem, /```figure\n/, '应插入 figure 块');
   assert.match(stem, new RegExp(FIGURE_KEY), '编辑已有题目时写真实 key，不再用 @photo');
   assert.match(stem, /0\.1000 0\.1000 0\.5000 0\.5000/, '坐标应是归一化的框（拖动范围 40,30→240,180）');
   assert.equal(stem.includes('─●───●─▶'), false, '模型画的字符画应被题图替换');
-  assert.equal(byClass(f.main, 'figrow').length, 1, '应出现题图缩略图');
+  assert.equal(byClass(inModal, 'figrow').length, 1, '应出现题图缩略图');
 
-  click(buttonWith(f.main, '保存'));
+  click(buttonWith(inModal, '保存'));
   await flush(); await flush();
   const put = f.calls.find(c => c.url === '/api/entry' && c.options.method === 'PUT');
   assert.ok(put, '保存应提交 PUT /api/entry');
@@ -927,13 +939,14 @@ test('编辑态可以删掉已有的题图，删完不再提交 figure 块', asy
     }
   });
   await openEditor(f);
+  const inModal = [f.main, f.body];
 
-  assert.equal(byClass(f.main, 'figrow').length, 1, '已有题图应列出来');
-  click(buttonWith(f.main, '删除此图'));
-  assert.equal(byClass(f.main, 'figrow').length, 0);
-  assert.equal(byClass(f.main, 'stem-input')[0].value.includes('```figure'), false);
+  assert.equal(byClass(inModal, 'figrow').length, 1, '已有题图应列出来');
+  click(buttonWith(inModal, '删除此图'));
+  assert.equal(byClass(inModal, 'figrow').length, 0);
+  assert.equal(byClass(inModal, 'stem-input')[0].value.includes('```figure'), false);
 
-  click(buttonWith(f.main, '保存'));
+  click(buttonWith(inModal, '保存'));
   await flush();
   const body = JSON.parse(f.calls.find(c => c.url === '/api/entry' && c.options.method === 'PUT').options.body);
   assert.equal(String(body.stem || '').includes('figure'), false, '删掉的题图不该再提交');
@@ -952,14 +965,114 @@ test('详情页把题图渲染成按框裁好的图，@photo 指向本条原图'
   click(byClass(f.main, 'qcard')[0]);
   await flush();
 
-  const fig = byClass(f.main, 'figcrop')[0];
+  const fig = byClass([f.main, f.body], 'figcrop')[0];
   assert.ok(fig, '详情里的 figure 块应渲染成题图而不是 pre');
   const img = fig.children[0];
   assert.match(String(img.src), /^\/api\/image\?key=/, '@photo 解析成本条原图');
   assert.equal(img.style.width, '250%');   // 100 / 0.4
   assert.equal(img.style.left, '-50%');    // -100 * 0.2 / 0.4
   assert.equal(img.style.top, '-150%');    // -100 * 0.3 / 0.2
-  assert.equal(byClass(f.main, 'figcrop').length, 1);
+  assert.equal(byClass([f.main, f.body], 'figcrop').length, 1);
+});
+
+test('详情用浮框弹出、点关闭收起，不再铺在列表底下（2026-10-13）', async () => {
+  const f = detailFixture();
+  await flush();
+  click(byClass(f.main, 'qcard')[0]);
+  await flush();
+
+  const mask = byClass(f.body, 'dmask')[0];
+  assert.ok(mask, '详情应作为浮框挂在 body 下');
+  assert.ok(byClass(mask, 'dmodal').length, '浮框本体存在');
+  assert.equal(byClass(f.main, 'dmask').length, 0, '列表容器里不该再嵌详情');
+  assert.equal(byClass(mask, 'detail').length, 1, '详情内容渲染在浮框里');
+  assert.ok(buttonWith(mask, '关闭'), '有关闭按钮');
+
+  click(buttonWith(mask, '关闭'));
+  assert.equal(byClass(f.body, 'dmask').length, 0, '点关闭后浮框收起');
+
+  // 再点开一张，浮框重新出现；同一时间只有一个
+  click(byClass(f.main, 'qcard')[0]);
+  await flush();
+  assert.equal(byClass(f.body, 'dmask').length, 1);
+});
+
+test('详情里显示知识点与备注，有内容才显示（2026-10-13）', async () => {
+  const f = detailFixture({ tags: ['数轴', '绝对值'], note: '考试原题，要重做一遍' });
+  await flush();
+  click(byClass(f.main, 'qcard')[0]);
+  await flush();
+
+  const mask = byClass(f.body, 'dmask')[0];
+  const chipsBox = byClass(mask, 'tchips')[0];
+  assert.ok(chipsBox, '知识点区存在');
+  assert.deepEqual(byClass(chipsBox, 'chip').map(c => c.textContent), ['数轴', '绝对值']);
+  const noteField = byClass(mask, 'field').filter(x => x.children[0] && x.children[0].textContent === '备注')[0];
+  assert.ok(noteField, '备注字段存在');
+  assert.match(noteField.children[1].textContent, /要重做一遍/);
+});
+
+test('工具栏不再有按对错的分组与筛选（2026-10-13）', async () => {
+  const f = detailFixture();
+  await flush();
+  assert.equal(f.main.textContent.includes('按对错'), false, '分组 tab 不该有按对错');
+  assert.equal(f.main.textContent.includes('全部对错'), false, '筛选下拉不该有全部对错');
+  const groups = byClass(f.main, 'tabs')[0].children.map(b => b.textContent);
+  assert.deepEqual(groups, ['按日期', '按知识点', '按题型', '按出处']);
+});
+
+test('导出弹窗支持手动选题：勾谁导谁（2026-10-13）', async () => {
+  const f = fixture({
+    hash: '#/subject/数学',
+    entries: {
+      items: ['第1题 填空题', '第2题 解答题', '第3题 解答题'].map((label, i) => {
+        const [qno, qtype] = label.split(' ');
+        return { id: 'e' + (i + 1), subject: '数学', exam: '有理数', date: '2026-10-13', qno, qtype,
+          result: 'unknown', source: '', tags: [], note: '', preview: '预览' + (i + 1),
+          image_key: '', md_key: 'md' + (i + 1) };
+      }),
+      facets: { tags: {}, qtype: {}, result: {}, exam: {}, source: {} }
+    }
+  });
+  await flush();
+  click(buttonWith(f.main, '导出'));
+  const mask = byClass(f.body, 'mask').pop();
+  assert.ok(mask, '导出弹窗出现');
+
+  // 默认不显示选题清单
+  assert.equal(byClass(mask, 'pickwrap')[0].style.display, 'none');
+
+  const scope = all(mask, e => e.tagName === 'select')[0];
+  input(scope, 'manual');
+  assert.notEqual(byClass(mask, 'pickwrap')[0].style.display, 'none', '切到手动选题后展开清单');
+  assert.equal(byClass(mask, 'pickitem').length, 3, '列出全部题');
+
+  // 一个没勾就导出 → 提示
+  click(buttonWith(f.body, '导出'));
+  assert.match(byClass(f.body, 'err')[0].textContent, /至少勾一道题/);
+
+  // 全选 → 三题全导（成功后弹窗自动关闭）
+  click(buttonWith(f.body, '全选'));
+  assert.match(byClass(mask, 'pickcount')[0].textContent, /已选 3 题/);
+  click(buttonWith(f.body, '导出'));
+  await flush();
+  const post = f.calls.find(c => c.url === '/api/export');
+  assert.ok(post, '应发起导出请求');
+  assert.deepEqual(JSON.parse(post.options.body).ids, ['e1', 'e2', 'e3'], '全选导全部');
+  assert.equal(byClass(f.body, 'mask').length, 0, '导出成功后弹窗关闭');
+
+  // 重新打开，勾两题（第 1、3 题）→ 导出的 ids 就是它们
+  click(buttonWith(f.main, '导出'));
+  const mask2 = byClass(f.body, 'mask').pop();
+  input(all(mask2, e => e.tagName === 'select')[0], 'manual');
+  const cbs = byClass(mask2, 'pickitem').map(l => l.children[0]);
+  cbs[0].checked = true; cbs[0].onchange();
+  cbs[2].checked = true; cbs[2].onchange();
+  assert.match(byClass(mask2, 'pickcount')[0].textContent, /已选 2 题/);
+  click(buttonWith(f.body, '导出'));
+  await flush();
+  const post2 = f.calls.filter(c => c.url === '/api/export').pop();
+  assert.deepEqual(JSON.parse(post2.options.body).ids, ['e1', 'e3'], '勾谁导谁');
 });
 
 test('导入草稿里框选题图，写 @photo 占位随题干进确认请求', async () => {
