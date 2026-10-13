@@ -218,6 +218,10 @@ cd ~/mistake-book   # Windows: C:\Users\efrainzhang\mistake-book
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOFLAGS=-mod=mod go build -trimpath -ldflags="-s -w" -o /tmp/mistake-book-linux .
 
 KEY=~/.workbuddy/../WorkBuddy/2026-09-20-09-52-09/outputs/deploy/ssh/jrp_deploy
+# ⚠️ KEY 路径只在 Windows 工作机有效。macOS 家用机上没有这个文件，
+# 直接 ssh（默认 ~/.ssh/id_ed25519 已在服务器授权，免密），遇到腾讯云扫码
+# 横幅是 banner 而非交互，BatchMode 下照常执行。token 在
+# `systemctl cat mistake-book` 的 ExecStart 里（--auth-token 参数）。
 ssh -i $KEY -o BatchMode=yes -o StrictHostKeyChecking=no root@154.8.216.179 'systemctl stop mistake-book'
 ssh -i $KEY -o BatchMode=yes -o StrictHostKeyChecking=no root@154.8.216.179 'cat > /usr/local/bin/mistake-book' < /tmp/mistake-book-linux
 ssh -i $KEY -o BatchMode=yes -o StrictHostKeyChecking=no root@154.8.216.179 \
