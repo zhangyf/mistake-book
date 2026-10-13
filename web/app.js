@@ -123,5 +123,8 @@ var app = (function () {
     route();
   }
 
-  return { boot: boot, api: api, el: el, renderText: renderText, toast: toast, setToken: setToken };
+  return {
+    boot: boot, api: api, el: el,
+    renderText: renderText, math: math, toast: toast, setToken: setToken
+  };
 })();
