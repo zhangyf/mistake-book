@@ -128,9 +128,42 @@ $EB get --key <key> --output local.md
 
 # 检查凭证 / 桶连通性（换机器先跑这个）
 $EB doctor
+
+# Web 服务（浏览 / 改 / 删）
+$EB serve                                    # 本机 http://127.0.0.1:8081
+$EB serve --port 8099 --dry-run              # 演练：改/删不写 COS
+$EB serve --addr 0.0.0.0 --auth-token xxxx   # 对外暴露必须带 token
 ```
 
 所有命令输出 JSON 到 stdout；错误走 stderr + 退出码 1。
+
+## Web 服务
+
+`mistake-book serve` 起一个纯 `net/http` 的服务（端口默认 8081），前端原生 JS + 内联 KaTeX，`go:embed` 打进二进制，**零外网 CDN**。
+
+- **集中页**：各科错题本卡片（题数 / 对错 / 所属试卷）→ 点进科目。
+- **详情页**：可按 **日期 / 知识点 / 题型 / 对错** 四个维度切换分组，支持按对错筛选、知识点多选、关键词搜索；点条目展开详情（左原图、右字段，LaTeX 由 KaTeX 渲染）；每条可改 result / tags / note，可删条目（只删索引，md 和原图保留）。
+- API：`GET /api/subjects`、`GET /api/entries`、`GET|PUT|DELETE /api/entry`、`GET /api/image?key=`（后端代理，凭证不出后端）。
+- 鉴权：`--auth-token`（或 `MISTAKE_AUTH_TOKEN`），非 loopback 监听没设 token 会拒绝启动。静态资源不鉴权，token 在页面输入后存 localStorage。
+- ⚠️ **改了 `web/` 下任何文件都必须重新编译二进制**（embed 打进去的）。
+
+### 服务器部署（154.8.216.179）
+
+跟 jrp 同一套：交叉编译 → 传二进制 → systemd → nginx 反代 → Basic Auth。
+
+```bash
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o mistake-book .
+# 传二进制：腾讯云扫码横幅会破坏 scp，用管道
+ssh -i <jrp_deploy> -o BatchMode=yes -o StrictHostKeyChecking=no root@154.8.216.179 \
+  'cat > /usr/local/bin/mistake-book' < ./mistake-book
+# 顺序必须 stop → cp → start，否则 Text file busy
+```
+
+- 端口 **8081**（8080 已被 jrp 占），Go 只听 `127.0.0.1`，TLS 和登录由 nginx 承担。
+- 外网入口 **`https://mistake.110105.xyz`**（子域 DNS + 证书由老师申请，证书放 `/etc/nginx/ssl/tencent/`）。
+- 凭证：systemd 用 `EnvironmentFile=/etc/mistake-book/mistake.env`（600）注入 `TENCENT_COS_*`。
+- Basic Auth：`/etc/nginx/.mistake_htpasswd`（与 jrp 独立）。
+- 改 `nginx.conf` 前**先备份**并 `nginx -t`（jrp 在同一份配置里，改坏会连带影响）。
 
 ## 提取规则（硬性）
 

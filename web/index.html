@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>错题本</title>
+<link rel="stylesheet" href="katex/katex.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="#/">错题本</a>
+  <span id="crumb" class="crumb"></span>
+  <span class="spacer"></span>
+  <button id="btn-token" class="ghost">Token</button>
+  <span id="token-state" class="token-state"></span>
+</header>
+
+<main id="app"></main>
+
+<div id="toast" class="toast"></div>
+
+<script src="katex/katex.min.js"></script>
+<script src="katex/auto-render.min.js"></script>
+<script src="app.js"></script>
+<script src="home.js"></script>
+<script src="subject.js"></script>
+<script>app.boot()</script>
+</body>
+</html>

@@ -34,6 +34,7 @@ Commands:
   search     关键词检索
   get        打印某个 COS 对象的原文（默认索引指向的 md）
   doctor     检查凭证与桶连通性
+  serve      启动错题本 Web 服务（浏览 / 改 / 删）
 
 Examples:
   mistake-book path --subject 数学 --exam "第一章有理数测验" --date 2026-09-21 --photo IMG_20260921_222934
@@ -44,6 +45,10 @@ Examples:
   mistake-book search --kw 乘方
   mistake-book get --key exam-bank/数学/2026-09-第一章有理数测验/2026-09-21-IMG_20260921_222934.md
   mistake-book doctor
+
+  mistake-book serve                                    # 本机 http://127.0.0.1:8081
+  mistake-book serve --port 8099 --dry-run              # 演练：改/删不写 COS
+  mistake-book serve --addr 0.0.0.0 --auth-token xxxx   # 对外暴露必须带 token
 `
 
 func main() {
@@ -70,6 +75,8 @@ func main() {
 		runGet(args)
 	case "doctor":
 		runDoctor(args)
+	case "serve":
+		runServe(args)
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
