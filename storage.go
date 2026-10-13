@@ -182,6 +182,7 @@ type Entry struct {
 	Qno       string   `json:"qno"`
 	Qtype     string   `json:"qtype,omitempty"`
 	Result    string   `json:"result,omitempty"`
+	Source    string   `json:"source,omitempty"` // 错题出处：校内作业/课外班作业/校内考试/自我复习
 	Tags      []string `json:"tags,omitempty"`
 	MdKey     string   `json:"md_key,omitempty"`
 	ImageKey  string   `json:"image_key,omitempty"`
@@ -267,6 +268,9 @@ func mergeEntry(old, neu Entry) Entry {
 	}
 	if neu.Result != "" {
 		out.Result = neu.Result
+	}
+	if neu.Source != "" {
+		out.Source = neu.Source
 	}
 	if neu.MdKey != "" {
 		out.MdKey = neu.MdKey

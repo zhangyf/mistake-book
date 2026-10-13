@@ -83,6 +83,7 @@ type entryItem struct {
 	Qno       string   `json:"qno"`
 	Qtype     string   `json:"qtype"`
 	Result    string   `json:"result"`
+	Source    string   `json:"source"`
 	Tags      []string `json:"tags"`
 	Note      string   `json:"note"`
 	ImageKey  string   `json:"image_key"`
@@ -105,6 +106,7 @@ func (s *server) handleEntries(w http.ResponseWriter, r *http.Request) {
 		"qtype":  {},
 		"result": {},
 		"exam":   {},
+		"source": {},
 	}
 	for _, it := range idx.Items {
 		if subject != "" && it.Subject != subject {
@@ -116,7 +118,8 @@ func (s *server) handleEntries(w http.ResponseWriter, r *http.Request) {
 		items = append(items, entryItem{
 			ID: it.ID, Subject: it.Subject, Exam: it.Exam, Date: it.Date,
 			Qno: it.Qno, Qtype: it.Qtype, Result: normResult(it.Result),
-			Tags: it.Tags, Note: it.Note, ImageKey: it.ImageKey, UpdatedAt: it.UpdatedAt,
+			Source: it.Source, Tags: it.Tags, Note: it.Note,
+			ImageKey: it.ImageKey, UpdatedAt: it.UpdatedAt,
 		})
 		facets["result"][normResult(it.Result)]++
 		if it.Qtype != "" {
@@ -124,6 +127,9 @@ func (s *server) handleEntries(w http.ResponseWriter, r *http.Request) {
 		}
 		if it.Exam != "" {
 			facets["exam"][it.Exam]++
+		}
+		if it.Source != "" {
+			facets["source"][it.Source]++
 		}
 		for _, t := range it.Tags {
 			if t != "" {
@@ -191,6 +197,7 @@ func (s *server) handleEntry(w http.ResponseWriter, r *http.Request) {
 		"qno":        found.Qno,
 		"qtype":      found.Qtype,
 		"result":     normResult(found.Result),
+		"source":     found.Source,
 		"tags":       found.Tags,
 		"note":       found.Note,
 		"updated_at": found.UpdatedAt,

@@ -66,6 +66,8 @@ func (s *server) mutate(apply func(idx *Index) error, verify func(idx *Index) bo
 type updateReq struct {
 	ID     string   `json:"id"`
 	Result string   `json:"result"`
+	Exam   string   `json:"exam"`
+	Source string   `json:"source"`
 	Tags   []string `json:"tags"`
 	Note   string   `json:"note"`
 }
@@ -87,6 +89,15 @@ func (s *server) updateEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, hasNote := raw["note"]
+	_, hasExam := raw["exam"]
+	_, hasSource := raw["source"]
+
+	switch req.Source {
+	case "", "校内作业", "课外班作业", "校内考试", "自我复习":
+	default:
+		failJSON(w, 400, "source 只能是：校内作业/课外班作业/校内考试/自我复习")
+		return
+	}
 	if req.ID == "" {
 		failJSON(w, 400, "缺少 id")
 		return
@@ -112,6 +123,12 @@ func (s *server) updateEntry(w http.ResponseWriter, r *http.Request) {
 				if req.Result != "" {
 					idx.Items[i].Result = req.Result
 				}
+				if hasExam {
+					idx.Items[i].Exam = req.Exam // 允许清空后重填
+				}
+				if hasSource {
+					idx.Items[i].Source = req.Source
+				}
 				if req.Tags != nil {
 					idx.Items[i].Tags = compactTags(req.Tags)
 				}
@@ -131,6 +148,12 @@ func (s *server) updateEntry(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				if req.Result != "" && it.Result != req.Result {
+					return false
+				}
+				if hasExam && it.Exam != req.Exam {
+					return false
+				}
+				if hasSource && it.Source != req.Source {
 					return false
 				}
 				if req.Tags != nil && !reflect.DeepEqual(it.Tags, compactTags(req.Tags)) {

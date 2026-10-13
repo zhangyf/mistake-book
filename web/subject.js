@@ -12,7 +12,8 @@ views.subject = (function () {
     openId: ''
   };
 
-  var DIM_LABEL = { date: '按日期', tag: '按知识点', type: '按题型', result: '按对错' };
+  var DIM_LABEL = { date: '按日期', tag: '按知识点', type: '按题型', source: '按出处', result: '按对错' };
+  var SOURCES = ['校内作业', '课外班作业', '校内考试', '自我复习'];
 
   function render(main, subject) {
     state.subject = subject;
@@ -119,6 +120,7 @@ views.subject = (function () {
   function groupKey(it) {
     switch (state.dim) {
       case 'type': return it.qtype || '未分类题型';
+      case 'source': return it.source || '未标注出处';
       case 'result': return { wrong: '错了的', correct: '做对的', unknown: '未判定' }[it.result] || '未判定';
       case 'tag': return (it.tags && it.tags.length) ? it.tags.join('、') : '未打标签';
       default: return (it.date || '').slice(0, 7) || '无日期';
@@ -159,6 +161,7 @@ views.subject = (function () {
     head.appendChild(dot);
     head.appendChild(app.el('span', 'qno', it.qno || '(无题号)'));
     if (it.qtype) head.appendChild(app.el('span', 'qtype', it.qtype));
+    if (it.source) head.appendChild(app.el('span', 'chip', it.source));
     head.appendChild(app.el('span', 'qtype', it.date || ''));
     (it.tags || []).forEach(function (t) { head.appendChild(app.el('span', 'chip', t)); });
     row.appendChild(head);
@@ -184,6 +187,11 @@ views.subject = (function () {
       dot.style.marginRight = '8px';
       head.appendChild(dot);
       head.appendChild(app.el('span', 'qno', (d.qno || '') + '　' + (d.qtype || '') + '　' + (d.exam || '') + '　' + (d.date || '')));
+      if (d.source) {
+        var sc = app.el('span', 'chip', d.source);
+        sc.style.marginLeft = '8px';
+        head.appendChild(sc);
+      }
       box.appendChild(head);
 
       var grid = app.el('div', 'grid');
@@ -246,6 +254,23 @@ views.subject = (function () {
     });
     wrap.appendChild(sel);
 
+    var exam = document.createElement('input');
+    exam.type = 'text';
+    exam.value = d.exam || '';
+    exam.placeholder = '试卷名';
+    exam.style.minWidth = '140px';
+    wrap.appendChild(exam);
+
+    var src = document.createElement('select');
+    src.appendChild(opt('', '出处：未标注'));
+    SOURCES.forEach(function (sname) {
+      var o = document.createElement('option');
+      o.value = sname; o.textContent = sname;
+      if (sname === (d.source || '')) o.selected = true;
+      src.appendChild(o);
+    });
+    wrap.appendChild(src);
+
     var tags = document.createElement('input');
     tags.type = 'text';
     tags.value = (d.tags || []).join('、');
@@ -268,6 +293,8 @@ views.subject = (function () {
       var body = {
         id: d.id,
         result: sel.value,
+        exam: exam.value.trim(),
+        source: src.value,
         tags: tags.value.split(/[、,，\s]+/).filter(function (x) { return x; }),
         note: note.value
       };
