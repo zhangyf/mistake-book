@@ -5,6 +5,21 @@ var app = (function () {
 
   function token() { return localStorage.getItem(TOKEN_KEY) || ''; }
 
+  // 带 token 的一次性链接：?token=xxx 或 #/...&token=xxx，点了就自动存好，
+  // 不用手工粘贴。（存完立刻从地址栏抹掉，避免留在历史记录里）
+  function captureTokenFromURL() {
+    var t = new URLSearchParams(location.search).get('token');
+    if (!t) {
+      var m = location.hash.match(/[?&]token=([^&]+)/);
+      if (m) t = decodeURIComponent(m[1]);
+    }
+    if (!t) return false;
+    setToken(t);
+    var url = location.pathname + (location.hash ? location.hash.split(/[?&]token=/)[0] : '');
+    history.replaceState(null, '', url || '/');
+    return true;
+  }
+
   function setToken(t) {
     if (t) localStorage.setItem(TOKEN_KEY, t);
     else localStorage.removeItem(TOKEN_KEY);
@@ -16,9 +31,12 @@ var app = (function () {
     if (el) el.textContent = token() ? '已设置 token' : '未设置 token';
   }
 
+  // 一次会话只问一次：401 每次都弹窗的话，点一道题弹一次，根本没法用。
+  var asked = false;
   function askToken() {
-    var cur = token();
-    var t = prompt('输入访问 token（服务端 --auth-token，留空表示不鉴权）', cur);
+    if (asked) return;
+    asked = true;
+    var t = prompt('输入访问 token（服务端 --auth-token 的值，不是网页登录密码）', token());
     if (t === null) return;
     setToken(t.trim());
   }
@@ -116,6 +134,7 @@ var app = (function () {
   }
 
   function boot() {
+    captureTokenFromURL();
     renderTokenState();
     document.getElementById('btn-token').onclick = askToken;
     window.addEventListener('hashchange', route);
@@ -124,7 +143,13 @@ var app = (function () {
   }
 
   return {
-    boot: boot, api: api, el: el,
-    renderText: renderText, math: math, toast: toast, setToken: setToken
+    boot: boot, api: api, el: el, renderText: renderText, math: math,
+    toast: toast, setToken: setToken, token: token,
+    // <img> 没法带自定义头，只能把 token 拼进 URL（后端也接受 ?token=）
+    withToken: function (url) {
+      var t = token();
+      if (!t) return url;
+      return url + (url.indexOf('?') >= 0 ? '&' : '?') + 'token=' + encodeURIComponent(t);
+    }
   };
 })();

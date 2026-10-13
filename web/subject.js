@@ -193,7 +193,8 @@ views.subject = (function () {
       var left = app.el('div');
       if (d.image_url) {
         var img = document.createElement('img');
-        img.src = d.image_url;
+        // <img> 请求带不上 X-Mistake-Token，只能拼在 URL 上
+        img.src = app.withToken(d.image_url);
         img.alt = '原图';
         left.appendChild(img);
       } else {
