@@ -182,8 +182,7 @@ views.subject = (function () {
   function itemRow(it, detailWrap) {
     var row = app.el('div', 'item');
     var head = app.el('div', 'head');
-    var dot = app.el('span', 'result-dot ' + (it.result || 'unknown'));
-    head.appendChild(dot);
+    // 不画对错圆点：错题本里全是要重做的题
     head.appendChild(app.el('span', 'qno', it.qno || '(无题号)'));
     if (it.qtype) head.appendChild(app.el('span', 'qtype', it.qtype));
     if (it.source) head.appendChild(app.el('span', 'chip', it.source));
@@ -208,9 +207,6 @@ views.subject = (function () {
     app.api('/api/entry?id=' + encodeURIComponent(it.id)).then(function (d) {
       box.textContent = '';
       var head = app.el('div', 'head');
-      var dot = app.el('span', 'result-dot ' + (d.result || 'unknown'));
-      dot.style.marginRight = '8px';
-      head.appendChild(dot);
       head.appendChild(app.el('span', 'qno', (d.qno || '') + '　' + (d.qtype || '') + '　' + (d.exam || '') + '　' + (d.date || '')));
       if (d.source) {
         var sc = app.el('span', 'chip', d.source);
@@ -349,15 +345,7 @@ views.subject = (function () {
   function editor(d, detailWrap) {
     var form = app.el('div', 'editform');
 
-    var sel = document.createElement('select');
-    [['correct', '做对了'], ['wrong', '做错了'], ['unknown', '未判定']].forEach(function (p) {
-      var o = document.createElement('option');
-      o.value = p[0]; o.textContent = p[1];
-      if (p[0] === (d.result || 'unknown')) o.selected = true;
-      sel.appendChild(o);
-    });
-    form.appendChild(frow('对错', sel));
-
+    // 没有「对错」这一项：错题本里全是要重做的，标对错没意义
     var exam = document.createElement('input');
     exam.type = 'text';
     exam.value = d.exam || '';
@@ -400,7 +388,6 @@ views.subject = (function () {
     save.onclick = function () {
       var body = {
         id: d.id,
-        result: sel.value,
         exam: exam.value.trim(),
         source: src.value,
         analysis: ana.value,

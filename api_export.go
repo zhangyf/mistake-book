@@ -239,7 +239,7 @@ func (s *server) buildExportItem(e Entry, format string, withImage bool) exportI
 	if e.Source != "" {
 		it.Meta = append(it.Meta, [2]string{"出处", e.Source})
 	}
-	it.Meta = append(it.Meta, [2]string{"结果", resultLabel(e.Result)})
+	// 不导「结果」：错题本里全是要重做的题，对错这一栏没意义（老师 2026-10-13）
 	if e.Subject != "" {
 		it.Meta = append(it.Meta, [2]string{"科目", e.Subject})
 	}
@@ -287,16 +287,6 @@ func (s *server) buildExportItem(e Entry, format string, withImage bool) exportI
 		}
 	}
 	return it
-}
-
-func resultLabel(r string) string {
-	switch normResult(r) {
-	case "correct":
-		return "做对了"
-	case "wrong":
-		return "做错了"
-	}
-	return "未判定"
 }
 
 // takeSection 从 secs 里取走第一个命中别名的字段，返回它的值和剩下的字段。
