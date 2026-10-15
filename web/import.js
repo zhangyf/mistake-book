@@ -214,7 +214,7 @@ views.import = (function () {
         p.confirm.textContent = p.status === 'uncertain' ? '重试确认（相同内容）' : (p.status === 'dry' ? '演练完成，未入库' : (p.status === 'success' ? '已入库，已锁定' : '确认入库（仅此图）'));
         p.resultHint.textContent = p.frozen ? (p.status === 'success' ? p.receipt : (p.status === 'dry' ? '演练未入库，不能计入成功数；本次请求已锁定。' : '请求内容已冻结，不可编辑或移除；重试将使用相同导入编号、原图与题目信息。')) :
           (p.status === 'empty' ? '本图所有草稿题目已移除，无法确认入库。请重新识别此图，或移除照片。' :
-            (p.questions.length && !ready(p) ? '旧草稿仅供参考：题号已变更、重识别中或失败，必须成功重新识别后才能核对入库。' : (p.model ? '本图识别模型：' + p.model : '')));
+            (p.questions.length && !ready(p) ? '旧草稿仅供参考：题号已变更、重识别中或失败，必须成功重新识别后才能核对入库。' : (p.model ? '本图识别模型：' + p.model + (p.fallback ? '（主模型未成功，已自动切换到备用模型）' : '') : '')));
       });
     }
 
@@ -232,7 +232,8 @@ views.import = (function () {
         maxPhotos = limit(d.max_photos, 20);
         maxBytes = limit(d.max_photo_bytes, 10485760);
         maxQuestions = limit(d.max_questions, 30);
-        configInfo.textContent = d.enabled ? '识别已启用；模型：' + (typeof d.model === 'string' ? d.model : '未提供') + '。' : '照片识别未启用：服务端尚未配置，不能开始识别。';
+        function modelName(value) { return typeof value === 'string' ? value : '未提供'; }
+        configInfo.textContent = d.enabled ? '识别已启用；主模型：' + modelName(d.model) + '；备用模型：' + (d.fallback_model ? modelName(d.fallback_model) : '未启用（主模型失败不自动切换）') + '。' : '照片识别未启用：服务端尚未配置，不能开始识别。';
         configInfo.textContent += ' 限制：' + maxPhotos + ' 张 / 每张 ' + (maxBytes / 1048576) + ' MiB / 每图最多 ' + maxQuestions + ' 题。';
         if (d.dry_run) configInfo.textContent += ' 当前为演练模式：确认成功也不会实际入库。';
       }).catch(function (e) {
@@ -256,7 +257,7 @@ views.import = (function () {
         var p = {
           id: id, file: file, url: URL.createObjectURL(file), numbers: '', recognizedNumbers: null,
           questions: [], reviewed: false, edited: false, status: 'pending', error: '',
-          frozen: null, uncertainAttempt: false, imported: 0, model: '', controls: [], controller: null
+          frozen: null, uncertainAttempt: false, imported: 0, model: '', fallback: false, controls: [], controller: null
         };
         photos.push(p);
         dirty = true;
@@ -494,6 +495,7 @@ views.import = (function () {
         p.edited = false;
         p.reviewed = false;
         p.model = typeof d.model === 'string' ? d.model : '';
+        p.fallback = d.fallback_used === true;
         paintQuestions(p);
       }).catch(function (e) {
         if (!exists(p)) return;

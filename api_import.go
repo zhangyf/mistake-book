@@ -39,10 +39,17 @@ const (
 type importFailure struct {
 	status  int
 	message string
+	// retryable 表示这次失败属于模型侧故障，允许自动换备用模型重试一次。
+	retryable bool
 }
 
-func (e *importFailure) Error() string             { return e.message }
-func importError(status int, message string) error { return &importFailure{status, message} }
+func (e *importFailure) Error() string { return e.message }
+func importError(status int, message string) error {
+	return &importFailure{status: status, message: message}
+}
+func retryableImportError(status int, message string) error {
+	return &importFailure{status: status, message: message, retryable: true}
+}
 func writeImportError(w http.ResponseWriter, err error) {
 	var failure *importFailure
 	if errors.As(err, &failure) {
@@ -134,6 +141,7 @@ func (s *server) handleImportConfig(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, 200, map[string]any{
 		"success": true, "enabled": s.vision.enabled(), "model": s.vision.model(),
+		"fallback_model": s.vision.fallbackModel(),
 		"max_photos": maxImportPhotos, "max_photo_bytes": maxImportPhotoBytes,
 		"max_questions": maxImportQuestions, "dry_run": s.dryRun,
 	})
@@ -156,13 +164,16 @@ func (s *server) handleImportRecognize(w http.ResponseWriter, r *http.Request) {
 		failJSON(w, 400, "题号不能为空且最多500字符")
 		return
 	}
-	questions, err := s.vision.recognize(r.Context(), photo, strings.TrimSpace(text))
+	questions, model, err := s.vision.recognize(r.Context(), photo, strings.TrimSpace(text))
 	if err != nil {
 		writeImportError(w, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, map[string]any{"success": true, "questions": questions, "model": s.vision.model()})
+	writeJSON(w, 200, map[string]any{
+		"success": true, "questions": questions, "model": model,
+		"fallback_used": model != s.vision.model(),
+	})
 }
 
 func (s *server) handleImportConfirm(w http.ResponseWriter, r *http.Request) {

@@ -166,9 +166,12 @@ func TestImportConfigDisabledAndDryRun(t *testing.T) {
 	requireImportStatus(t, w, 200)
 	var got map[string]any
 	json.Unmarshal(w.Body.Bytes(), &got)
-	if len(got) != 7 || got["enabled"] != false || got["model"] != defaultVisionModel || got["max_photos"] != float64(20) ||
+	if len(got) != 8 || got["enabled"] != false || got["model"] != defaultVisionModel || got["max_photos"] != float64(20) ||
 		got["max_photo_bytes"] != float64(10485760) || got["max_questions"] != float64(30) || got["dry_run"] != true {
 		t.Fatalf("配置契约错误: %v", got)
+	}
+	if _, ok := got["fallback_model"].(string); !ok {
+		t.Fatalf("配置缺少备用模型字段: %v", got)
 	}
 	r = httptest.NewRequest("POST", "/api/import/recognize", nil)
 	r.Header.Set("X-Mistake-Token", "test-auth")

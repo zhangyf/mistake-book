@@ -24,9 +24,11 @@
 
 ### 模型配置与上线前提
 
-服务单独读取 `MISTAKE_LLM_ENDPOINT`、`MISTAKE_LLM_API_KEY`、`MISTAKE_LLM_MODEL`（默认 `deepseek-v4.1-flash`）。endpoint 必须显式配置为已有 TokenHub HTTPS 完整 chat/completions 地址；不自动读取或修改 jrp 的配置，不把密钥发送到浏览器。未配置时原有浏览/编辑照常，识别显示未启用。
+服务单独读取 `MISTAKE_LLM_ENDPOINT`、`MISTAKE_LLM_API_KEY`、`MISTAKE_LLM_MODEL`（默认 `deepseek/deepseek-flash`）。endpoint 必须显式配置为已有 TokenHub HTTPS 完整 chat/completions 地址；不自动读取或修改 jrp 的配置，不把密钥发送到浏览器。未配置时原有浏览/编辑照常，识别显示未启用。
 
-上线需单独授权并配置服务环境变量、nginx `client_max_body_size 12m` 及至少120秒的代理读取超时。识别本身90秒超时，不自动重试付费请求。不能只替换二进制却未配置模型便声称识别已启用。
+`MISTAKE_LLM_FALLBACK_MODEL`（默认 `kimi-k3`）是自动顶上的备用模型。只有**模型侧可重试失败**才切换一次：超时、网络失败、上游非 200、模型返回空题目。上游限流（429）、结果过大、上游回显密钥、字段内容非法都不重试——换模型也拿不到更好的结果，只会多付一次费。配成 `-`/`off`/`none`/`disabled` 或与主模型同名即关闭切换。切换是透明的：`/api/import/recognize` 返回实际生效的 `model` 与 `fallback_used`，页面在照片下方写明「本图识别模型：…（主模型未成功，已自动切换到备用模型）」。
+
+上线需单独授权并配置服务环境变量、nginx `client_max_body_size 12m` 及至少 200 秒的代理读取超时（单次识别 90 秒，启用备用模型后一次用户操作最长 180 秒）。主模型失败才产生第二次付费请求。不能只替换二进制却未配置模型便声称识别已启用。
 
 索引读取仅在 COS 明确返回对象不存在时初始化；权限、网络、空内容或损坏 JSON 均停止写入。新索引增加 `imports` 回执字段，因此所有参与写入的 CLI/服务应同步升级，旧版写入可能丢弃回执。当前进程内串行化加写后校验，不是跨进程 CAS；应避免与旧 CLI 或其他服务实例同时写索引。上传中断可能留下未索引对象，原样重试可复用，不自动删除。
 

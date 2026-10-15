@@ -168,6 +168,24 @@ test('识别后只产生草稿，不自动核对或提交；未勾选无法确�
   assert.match(p.textContent, /请先成功识别并勾选已核对/);
 });
 
+test('主模型失败自动切换备用模型时明确提示，正常识别不显示切换', async () => {
+  const f = fixture({ config: { model: 'primary-model', fallback_model: 'backup-model' } }); await flush();
+  f.add(file());
+  f.control.recognize = () => ({ success: true, questions: [question()], model: 'backup-model', fallback_used: true });
+  f.recognize(f.photos()[0]);
+  await flush();
+  assert.match(f.photos()[0].textContent, /本图识别模型：backup-model（主模型未成功，已自动切换到备用模型）/);
+  const plain = fixture({ config: { model: 'primary-model', fallback_model: 'backup-model' } }); await flush();
+  plain.add(file());
+  plain.control.recognize = () => ({ success: true, questions: [question()], model: 'primary-model', fallback_used: false });
+  plain.recognize(plain.photos()[0]);
+  await flush();
+  assert.match(plain.photos()[0].textContent, /本图识别模型：primary-model(?!（)/);
+  assert.match(plain.nodes.app.textContent, /备用模型：backup-model/);
+  const off = fixture({ config: { model: 'primary-model', fallback_model: '' } }); await flush();
+  assert.match(off.nodes.app.textContent, /备用模型：未启用/);
+});
+
 test('所有草稿字段有 label；任何字段与批次编辑均撤销核对', async () => {
   const f = await readyFixture();
   const p = f.photos()[0];
